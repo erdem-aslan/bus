@@ -1,11 +1,12 @@
 package bus
 
 import (
-	"github.com/golang/protobuf/proto"
-	"log"
+	"fmt"
 	"net"
-	"sync"
 	"time"
+	"sync"
+	"errors"
+	"github.com/golang/protobuf/proto"
 )
 
 type ContextState string
@@ -19,62 +20,145 @@ const (
 	NetworkClosed              = "NetworkClosed" // NetworkClosed is two of the final states of Context; network/io originated shutdown.
 )
 
-// Context interface implementation, currently used for all transport types.
-type busContext struct {
+var (
+	// Context Errors
+	BusError_ContextClosed                 = errors.New("Context is closed")
+	BusError_ContextOpening                = errors.New("Context is opening")
+	BusError_ContextClosing                = errors.New("Context is closing")
+	BusError_ContextReconnecting           = errors.New("Context is reconnecting")
+	BusError_ContextDisconnected           = errors.New("Context is disconnected")
+	BusError_ContextReconnectingBufferFull = errors.New("Context is reconnecting, cannot buffer message")
+
+	// Message Errors
+	BusError_IO                  = errors.New("IO/Transport error")
+	BusError_AlreadySent         = errors.New("Message already sent")
+	BusError_DeliveryFailed      = errors.New("Message delivery has failed")
+	BusError_DeliveryTimeout     = errors.New("Message delivery timed out")
+	BusError_AlreadyCancelled    = errors.New("Message already cancelled")
+	BusError_FailedMarshaling    = errors.New("Message delivery has failed due to marshalling")
+	BusError_FailedUnmarshalling = errors.New("Message receiving has failed due to unmarshalling")
+)
+
+// Every endpoint has a dedicated Context, depending on the underlying transport, implementation may vary.
+//
+// Send methods return MessagePromise which provides a way of cancellation.
+// Send methods also returns error if Context is closed and/or closing.
+//
+// All exposed methods accepts a func, ReportFunc, which will be executed at the end of the messages' life cycles.
+// Its safe to provide a nil ReportFunc so this parameter is optional
+//
+type Context interface {
+
+	// Idiomatic Send method, sufficient for most use cases
+	Send(m proto.Message, r ReportFunc) (Promise, error)
+
+	// SendAfter method for providing delayed messaging.
+	SendAfter(m proto.Message, d time.Duration, r ReportFunc) (Promise, error)
+
+	// SendWithTimeout method for providing validity period of messages.
+	// This method's implementations, unless documented specifically, would not create new timers.
+	SendWithTimeout(m proto.Message, d time.Duration, r ReportFunc) (Promise, error)
+
+	// SendWithHighPriority method for sending prioritized messages which will bypass other queued messages in terms of ordering
+	SendWithHighPriority(m proto.Message, r ReportFunc) (Promise, error)
+
+	// Closes the context and all resources its attached to.
+	// Pending messages will be reported back as delivery failure and further message sender methods will return error
+	Close()
+
+	// Returns the state if this context.
+	State() ContextState
+
+	// Closes gracefully with timeout. Within provided duration, Bus will try to consume all messages while honoring
+	// the throttling if configured.
+	//
+	// Remaining messages that missed the grace period for sending, will be report back as delivery failure.
+	CloseGracefully(t time.Duration)
+
+	// Returns the endpoint which this context attached to.
+	Endpoint() Endpoint
+
+	// String() is nice to have
+	fmt.Stringer
+
+}
+
+// ContextHandler interface defines the contract for context state transition event(s)
+// Every callback runs in a separate goroutine, so if implementation is shared among multiple endpoints,
+// it should be thread safe (stateless). Briefly state transition callbacks are not sequential.
+//
+// Context state transitions are fast, implementors definitely would find themselves parallel execution
+// of, for example, Opening and Opened state transition callbacks.
+//
+// Note: Not all transport types transition through all states.
+type ContextHandler interface {
+	// State changed callback method
+	ContextStateChanged(ctx Context, s ContextState)
+}
+
+// Context interface implementation, used for socket based transports.
+type socketContext struct {
 
 	// contexts map key
 	ctxId string
-	// resolved dest address for easy reconnection
+	// resolved dest address for easy reconnection, valid for client contexts
 	resolvedDest string
-	// reconnection attempt count
+	// reconnection attempt count, valid for client contexts
 	rcCount int
+	served  bool
 
 	e     Endpoint
 	conn  net.Conn
 	state ContextState
 
-	// reader shutdown channel
+	// reader/writer shutdown channels
 	rs chan struct{}
-	// writer normal queue
-	wc chan *busMessagePromise
-	// writer priority queue
-	pwc chan *busMessagePromise
+	ws chan struct{}
+
+	// context send queue
+	ctxQueue chan *busPromise
+
+	// user close request chan
+	ctxQuit chan struct{}
+	// network disconnect signal chan
+	netQuit chan struct{}
 
 	sync.RWMutex
 }
 
-func (c *busContext) Send(m proto.Message, r ReportFunc) (Promise, error) {
+func (c *socketContext) Send(m proto.Message, r ReportFunc) (Promise, error) {
 
-	err := validateContextState(c, false)
+	err := validateContextState(c)
 
 	if err != nil {
 		return nil, err
 	}
 
-	b := &busMessagePromise{
+	b := &busPromise{
 		msg:   m,
 		rFunc: r,
 		state: Queued,
 	}
 
-	c.wc <- b
+	c.ctxQueue <- b
 
 	return b, nil
 
 }
 
-func (c *busContext) SendAfter(m proto.Message, d time.Duration, r ReportFunc) (Promise, error) {
+func (c *socketContext) SendAfter(m proto.Message, d time.Duration, r ReportFunc) (Promise, error) {
 
-	err := validateContextState(c, true)
+	err := validateContextState(c)
 
 	if err != nil {
 		return nil, err
 	}
 
-	b := &busMessagePromise{
-		msg:   m,
-		rFunc: r,
-		state: SendScheduled,
+	b := &busPromise{
+		msg:    m,
+		rFunc:  r,
+		state:  SendScheduled,
+		urgent: true,
 	}
 
 	b.expTimer = time.AfterFunc(d, func() {
@@ -95,102 +179,106 @@ func (c *busContext) SendAfter(m proto.Message, d time.Duration, r ReportFunc) (
 		case NetworkClosed:
 			r(b.msg, BusError_ContextDisconnected)
 		default:
-			c.pwc <- b
+			c.ctxQueue <- b
 		}
 	})
 
 	return b, nil
 }
 
-func (c *busContext) SendWithTimeout(m proto.Message, d time.Duration, r ReportFunc) (Promise, error) {
+func (c *socketContext) SendWithTimeout(m proto.Message, d time.Duration, r ReportFunc) (Promise, error) {
 
-	err := validateContextState(c, false)
+	err := validateContextState(c)
 
 	if err != nil {
 		return nil, err
 	}
 
-	b := &busMessagePromise{
+	b := &busPromise{
 		msg:        m,
 		rFunc:      r,
 		state:      Queued,
 		validUntil: time.Now().Add(d),
 	}
 
-	c.wc <- b
+	c.ctxQueue <- b
 
 	return b, nil
 }
 
-func (c *busContext) SendWithHighPriority(m proto.Message, r ReportFunc) (Promise, error) {
+func (c *socketContext) SendWithHighPriority(m proto.Message, r ReportFunc) (Promise, error) {
 
-	err := validateContextState(c, false)
+	err := validateContextState(c)
 
 	if err != nil {
 		return nil, err
 	}
 
-	b := &busMessagePromise{
-		msg:   m,
-		rFunc: r,
-		state: Queued,
+	b := &busPromise{
+		msg:    m,
+		rFunc:  r,
+		state:  Queued,
+		urgent: true,
 	}
 
-	c.pwc <- b
+	c.ctxQueue <- b
 
 	return b, nil
 }
 
-func (c *busContext) Close() {
+func (c *socketContext) Close() {
+
+	state := c.State()
+
+	if state != Opening && state != Open && state != Reopening {
+		return
+	}
+
 	c.setState(UserClosed)
-
-	log.Println("Context sending shutdown trigger to reader...")
-	c.rs <- struct{}{}
-
-	log.Println("Cleaning up context reference...")
-	cLock.Lock()
-	defer cLock.Unlock()
-	delete(contexts, c.ctxId)
-
+	c.ctxQuit <- struct{}{}
 }
 
-func (c *busContext) State() ContextState {
+func (c *socketContext) State() ContextState {
 	c.RLock()
 	defer c.RUnlock()
 	return c.state
 }
 
-func (c *busContext) CloseGracefully(t time.Duration) {
+func (c *socketContext) CloseGracefully(t time.Duration) {
+
+	state := c.State()
+
+	if state != Opening && state != Open && state != Reopening {
+		return
+	}
+
 	c.setState(UserClosing)
-	c.rs <- struct{}{}
+	c.ctxQuit <- struct{}{}
 }
 
-func (c *busContext) Endpoint() Endpoint {
+func (c *socketContext) Endpoint() Endpoint {
 	return c.e
 }
 
-func (c *busContext) String() string {
+func (c *socketContext) String() string {
 	return c.ctxId
 }
 
-// State setter and ContextHandler callback executor
-func (c *busContext) setState(s ContextState) {
+func (c *socketContext) setState(s ContextState) {
 
 	if c.State() == s {
-		log.Println("State is already", s, " !")
 		return
 	}
 
 	c.Lock()
 	c.state = s
-	log.Println("State updated:", c.state, "for state:", c)
 	c.Unlock()
 
 	c.notifyLc(s)
 
 }
 
-func (c *busContext) notifyLc(s ContextState) {
+func (c *socketContext) notifyLc(s ContextState) {
 
 	l := c.e.ContextHandler()
 
@@ -204,57 +292,8 @@ func (c *busContext) notifyLc(s ContextState) {
 
 // -----------------------------------------------
 
-// Promise interface implementation
-type busMessagePromise struct {
-	state      *PromiseState
-	msg        proto.Message
-	rFunc      ReportFunc
-	expTimer   *time.Timer
-	validUntil time.Time
-
-	sync.RWMutex
-}
-
-func (p *busMessagePromise) Cancel() error {
-
-	s := p.State()
-
-	switch s {
-	case Sent:
-		return BusError_AlreadySent
-	case Cancelled:
-		return BusError_AlreadyCancelled
-	case Failed_Serialization:
-		return BusError_DeliveryFailed
-	case Failed_Transport:
-		return BusError_DeliveryFailed
-	case Failed_Timeout:
-		return BusError_DeliveryTimeout
-	}
-
-	p.setState(Cancelled)
-
-	return nil
-}
-
-func (p *busMessagePromise) State() PromiseState {
-	p.RLock()
-	defer p.RUnlock()
-	return p.state
-}
-
-func (p *busMessagePromise) setState(s PromiseState) {
-	p.Lock()
-	defer p.Unlock()
-	p.state = s
-}
-
-// -----------------------------------------------
-
 // internal function to check the state of context
-//
-// p bool argument: if context state checking being made for prioritized message sending or not
-func validateContextState(c *busContext, p bool) error {
+func validateContextState(c *socketContext) error {
 
 	c.RLock()
 	defer c.RUnlock()
@@ -273,17 +312,12 @@ func validateContextState(c *busContext, p bool) error {
 		if c.Endpoint().BufferSize() <= 0 {
 			// Endpoint does not configured to be buffered
 			return BusError_ContextReconnecting
+
+		} else if float64(len(c.ctxQueue)) >= float64(c.Endpoint().BufferSize())*0.9 {
+
+			return BusError_ContextReconnectingBufferFull
 		}
 
-		if p {
-			if float64(len(c.pwc)) >= float64(c.Endpoint().BufferSize())*0.9 {
-				return BusError_ContextReconnectingBufferFull
-			}
-		} else {
-			if float64(len(c.wc)) >= float64(c.Endpoint().BufferSize())*0.9 {
-				return BusError_ContextReconnectingBufferFull
-			}
-		}
 	}
 
 	return nil

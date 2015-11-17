@@ -1,202 +1,83 @@
 // Bus, acts as a messaging "bus" with complete transporting support for protocol buffer objects.
-// It handles the framing, reliability of connections (endpoints), throttling and  ordered delivery of messages.
+// It handles the framing, reliability of connections (tcp|udp|ws (websocket) endpoints), throttling (all endpoints) and  ordered delivery (all endpoints) of messages.
+//
+// Although, messaging structure is defined via protobuf, since protobuf supports JSON, serialization and deserialization may be in JSON format
+// for http|https endpoints if desired.
+//
+// Further documentation and samples can be found at https://github.com/gladmir/bus
 package bus
 
 import (
 	"errors"
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"sync"
-	"time"
 )
 
 type PromiseState string
 
 const (
-	SendScheduled        PromiseState = "SendScheduled"
-	Queued                                   = "Queued"
-	Cancelled                                = "Cancelled"
-	Sent                                     = "Sent"
-	Failed_Timeout                           = "Failed_Timeout"
-	Failed_Serialization                     = "Failed_Serialization"
-	Failed_Transport                         = "Failed_Transport"
+	SendScheduled       PromiseState = "SendScheduled"
+	Queued                           = "Queued"
+	Cancelled                        = "Cancelled"
+	Sent                             = "Sent"
+	FailedTimeout                    = "FailedTimeout"
+	FailedSerialization              = "FailedSerialization"
+	FailedTransport                  = "FailedTransport"
 )
 
 var (
 
 	// contexts map holds the references of 'live' contexts with keys generated via
-	// [endpoint's nickname] + [endpoint's ip] + [endpoint's port] + [endpoints's transport]
-	//
-	// One way to connect to same endpoint multiple times to provide different handles (nicknames) to individual
-	// bus.Dial(...) calls.
-	contexts map[string]Context = make(map[string]Context)
-	cLock    sync.RWMutex
+	// [endpoint's id] + [endpoint's ip] + [endpoint's port] + [endpoints's transport]
+	contexts map[string]*socketContext = make(map[string]*socketContext)
+
+	// Similar to contexts (client side contexts), servedContexts holds the references of 'live' contexts currently served.
+	servedContexts map[string]Context = make(map[string]Context)
+
+	// key = endpointId, value net.Listener.
+	endpointListeners map[string]*listenerShutdown = make(map[string]*listenerShutdown)
+
+	cLock  sync.RWMutex
+	scLock sync.RWMutex
+	elLock sync.RWMutex
 
 	// Endpoint Errors
-	BusError_DestInfoMissing           = errors.New("Missing fqdn/ip or port")
 	BusError_InvalidTransport          = errors.New("Invalid transport")
-	BusError_MissingMessageHandler     = errors.New("Missing message handler implementation")
-	BusError_MissingPrototypeInstance  = errors.New("Prototype instance is missing")
+	BusError_DestInfoMissing           = errors.New("Missing fqdn/ip or port")
 	BusError_EndpointAlreadyRegistered = errors.New("Endpoint already registered")
+	BusError_MissingPrototypeInstance  = errors.New("Prototype instance is missing")
+	BusError_MissingMessageHandler     = errors.New("Missing message handler implementation")
 )
-
-// Destination interface defines the contract for various endpoints with different transports.
-type Endpoint interface {
-
-	// TCP/IP stack address information
-	IP() string
-
-	// TCP/IP stack port information
-	Port() int
-
-	// Fully qualified domain name information.
-	// Implementors may choose to provide Hostname (FQDN) instead of IP, bus will try to resolve the FQDN if provided.
-	FQDN() string
-
-	// EndpointId is present for correlation between endpoints and contexts
-	// More practical usage of different endpointId is when you need to connect to the same endpoint with same ip/port/transport.
-	//
-	// Bus differentiates the endpoints by generating keys with;
-	//
-	//	[endpointId]-[ip:port]-[transport]
-	//
-	EndpointId() string
-
-	// Transport may be one of "tcp|udp|sctp|http|https"
-	Transport() string
-
-	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
-	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
-	// buffer is full.
-	BufferSize() int
-
-	// ShouldReconnect, if true, also returns the maximum retry count. Zero or negative value for retry count means
-	// retrying forever.
-	ShouldReconnect() (bool, int)
-
-	// PrototypeInstance should return a zero value of User's Protocol Buffer object.
-	PrototypeInstance() proto.Message
-
-	// Mandatory MessageHandler implementation
-	MessageHandler() MessageHandler
-
-	// Optional ContextHandler implementation
-	ContextHandler() ContextHandler
-}
-
-// ContextHandler interface defines the contract for context state transition event(s)
-// Every callback runs in a separate goroutine, so if implementation is shared among multiple endpoints,
-// it should be thread safe (stateless). Briefly state transition callbacks are not sequential.
-//
-// Context state transitions are fast, implementors definitely would find themselves parallel execution
-// of, for example, Opening and Opened state transition callbacks.
-//
-// Note: Not all transport types transition through all states.
-type ContextHandler interface {
-	// State changed callback method
-	ContextStateChanged(ctx Context, s ContextState)
-}
-
-// MessageHandler interface exposes one single method for incoming messages.
-type MessageHandler interface {
-
-	// All incoming messages are being passed to MessageHandler via HandleMessage method.
-	// Bare in mind, bus will forget about the message once the HandleMessage method execution is finished.
-	HandleMessage(ctx Context, m proto.Message)
-}
-
-var (
-	// Context Errors
-	BusError_ContextOpening                = errors.New("Context is opening")
-	BusError_ContextClosed                 = errors.New("Context is closed")
-	BusError_ContextClosing                = errors.New("Context is closing")
-	BusError_ContextReconnectingBufferFull = errors.New("Context is reconnecting, cannot buffer message")
-	BusError_ContextReconnecting           = errors.New("Context is reconnecting")
-	BusError_ContextDisconnected           = errors.New("Context is disconnected")
-)
-
-// Every endpoint has a dedicated Context, depending on the underlying transport, implementation may vary.
-//
-// Send methods return MessagePromise which provides a way of cancellation.
-// Send methods also returns error if Context is closed and/or closing.
-//
-// All exposed methods accepts a func, ReportFunc, which will be executed at the end of the messages' life cycles.
-// Its safe to provide a nil ReportFunc so this parameter is optional
-//
-type Context interface {
-
-	// String() is nice to have
-	fmt.Stringer
-
-	// Idiomatic Send method, sufficient for most use cases
-	Send(m proto.Message, r ReportFunc) (Promise, error)
-
-	// SendAfter method for providing delayed messaging.
-	SendAfter(m proto.Message, d time.Duration, r ReportFunc) (Promise, error)
-
-	// SendWithTimeout method for providing validity period of messages.
-	// This method's implementations, unless documented specifically, would not create new timers.
-	SendWithTimeout(m proto.Message, d time.Duration, r ReportFunc) (Promise, error)
-
-	// SendWithHighPriority method for sending prioritized messages which will bypass other queued messages in terms of ordering
-	SendWithHighPriority(m proto.Message, r ReportFunc) (Promise, error)
-
-	// Closes the context and all resources its attached to.
-	// Pending messages will be reported back as delivery failure and further message sender methods will return error
-	Close()
-
-	// Returns the state if this context.
-	State() ContextState
-
-	// Closes gracefully with timeout. Within provided duration, Bus will try to consume all messages while honoring
-	// the throttling if configured.
-	//
-	// Remaining messages that missed the grace period for sending, will be report back as delivery failure.
-	CloseGracefully(t time.Duration)
-
-	// Returns the endpoint which this context attached to.
-	Endpoint() Endpoint
-}
-
-// Every send method returns a Promise.
-type Promise interface {
-
-	// Getter method for PromiseState
-	State() PromiseState
-
-	// Useful for canceling scheduled/timed and queued messages.
-	// Returns error if message is already cancelled, expired, delivered or failed to be delivered
-	Cancel() error
-}
-
-// Final delivery report of messages will be done via ReportFunc callback.
-// It's safe to assume successful delivery of the message if err is nil.
-type ReportFunc func(m proto.Message, err error)
 
 func init() {
 	log.SetPrefix("<Bus> ")
 	log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
+
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
 }
 
-// Idiomatic entry point for client side communication via Bus.
-//
-// Details about 'Endpoint', 'Context' and possible error values are documented individually.
-func Dial(e Endpoint) (Context, error) {
+// Idiomatic entry point for client side communication for socket endpoints.
+func DialEndpoint(e Endpoint) (Context, error) {
 
-	cLock.Lock()
-	defer cLock.Unlock()
-
-	destAddress, cKey, err := resolveEndpoint(e)
+	destAddress, cKey, err := evalAddressAndKey(e)
 
 	if err != nil {
 		return nil, err
 	}
 
-	ctx := &busContext{
+	ctx := &socketContext{
 		e:            e,
 		resolvedDest: destAddress,
 		ctxId:        cKey,
+		ctxQueue:     make(chan *busPromise, e.BufferSize()),
+		ctxQuit:      make(chan struct{}),
+		netQuit:      make(chan struct{}),
 	}
 
 	ctx.setState(Opening)
@@ -207,7 +88,109 @@ func Dial(e Endpoint) (Context, error) {
 		return nil, err
 	}
 
+	cLock.Lock()
+	defer cLock.Unlock()
 	contexts[cKey] = ctx
 
 	return ctx, nil
+}
+
+// Idiomatic entry point for client side communication for http(s) endpoints.
+func DialHttpEndpoint(e HttpEndpoint) (Context, error) {
+	//@todo
+	return nil, nil
+}
+
+// Idiomatic function for server side communication via Bus
+//
+// As opposed to Dial, Serve provides the contexts attached to given endpoints within ContextHandler
+// 'Opening' callback for the first time, due to the nature of being server side.
+//
+// Usually, server side coding resides within finite state machines attached to individual messaging contexts which in our case,
+// ContextHandler and MessageHandler implementations. Practically, if you really need to implement logic out of these two interfaces,
+// just hold on to Context within ContextHandler's 'Opening' callback and use the context wherever you see fit (similar to client side usage).
+// Like client side bus usage, ContextHandler implementation is still optional.
+//
+// TL;DR:
+//
+// If you need to send a message to connected clients as soon as they arrive, implement the ContextHandler and MessageHandler
+//
+// If connected clients will start the messaging and depending on the logic you want to provide if you only need to respond to client requests,
+// just ignore the ContextHandler implementation, MessageHandler implementation is all you need.
+//
+// See StopServing and StopServingAll functions for stopping server side endpoints without a context handle.
+//
+// Serve func never blocks and returns the initial errors, if any, via ResultFunc func callback in a separate goroutine.
+// You can pass nil for ResultFunc func parameter if you don't want an error callback.
+func Serve(r ResultFunc, e ...Endpoint) {
+
+	log.Println("Serving to endpoints:", e)
+
+	for i, v := range e {
+
+		err := serve(v)
+
+		if err != nil && r != nil {
+			go r(e[i], err)
+		}
+	}
+}
+
+// Func for initialization and shutdown callback for endpoints on server side bus.
+type ResultFunc func(e Endpoint, err error)
+
+// Stops endpoint(s)
+// Open contexts will be closed and finally corresponding server side endpoints will be shutdown.
+// Only errors which happen during the endpoint shutdowns will be reported via ResultFunc.
+//
+// As usual, pass nil ResultFunc if you don't want/interested an/in error callback.
+func StopServing(r ResultFunc, endpoints ...Endpoint) {
+
+	for _, e := range endpoints {
+
+		l := endpointListeners[e.Id()]
+
+		if l == nil {
+			if r != nil {
+				r(e, errors.New(fmt.Sprintf("Endpoint already stopped or never served with id: %s", e.Id())))
+			}
+		}
+
+		// close the contexts first
+
+		for _, c := range servedContexts {
+			if c.Endpoint().Id() == e.Id() {
+				c.Close()
+			}
+		}
+
+		l.q <- struct{}{}
+		l.l.Close()
+	}
+}
+
+// Stops all contexts and endpoints currently live and running in bus.
+func StopServingAll() {
+
+	for _, c := range servedContexts {
+		c.Close()
+	}
+
+	for _, l := range endpointListeners {
+		l.q <- struct{}{}
+		l.l.Close()
+	}
+}
+
+// Short hand func for;
+//  - Close all client and server contexts
+//  - Close all served endpoints
+//  - Report back any error if ResultFunc is not nil.
+func Stop(r ResultFunc) {
+
+	for _, cc := range contexts {
+		cc.Close()
+	}
+
+	StopServingAll()
 }

@@ -1,0 +1,26 @@
+syntax = "proto3";
+package bus;
+
+
+message TestFrame {
+
+    enum EventType {
+        PING = 0;
+        PONG = 1;
+    }
+
+    message Ping {
+        uint64 epoch = 1;
+    }
+
+    message Pong {
+        uint64 epoch = 1;
+    }
+
+    EventType eventType = 1;
+    Ping ping = 2;
+    Pong pong = 3;
+
+
+}
+
