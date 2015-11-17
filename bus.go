@@ -52,16 +52,6 @@ var (
 	BusError_MissingMessageHandler     = errors.New("Missing message handler implementation")
 )
 
-func init() {
-	log.SetPrefix("<Bus> ")
-	log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
-
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
-
-}
-
 // Idiomatic entry point for client side communication for socket endpoints.
 func DialEndpoint(e Endpoint) (Context, error) {
 
@@ -123,8 +113,6 @@ func DialHttpEndpoint(e HttpEndpoint) (Context, error) {
 // Serve func never blocks and returns the initial errors, if any, via ResultFunc func callback in a separate goroutine.
 // You can pass nil for ResultFunc func parameter if you don't want an error callback.
 func Serve(r ResultFunc, e ...Endpoint) {
-
-	log.Println("Serving to endpoints:", e)
 
 	for i, v := range e {
 
