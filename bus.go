@@ -10,9 +10,6 @@ package bus
 import (
 	"errors"
 	"fmt"
-	"log"
-	"net/http"
-	_ "net/http/pprof"
 	"sync"
 )
 

@@ -1,9 +1,9 @@
 package bus
 
 import (
-	"time"
 	"bufio"
 	"github.com/golang/protobuf/proto"
+	"time"
 )
 
 func startNewWriter(ctx *socketContext) (<-chan error, chan<- *busPromise, chan<- *busPromise) {

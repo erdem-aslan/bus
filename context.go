@@ -1,12 +1,12 @@
 package bus
 
 import (
-	"fmt"
-	"net"
-	"time"
-	"sync"
 	"errors"
+	"fmt"
 	"github.com/golang/protobuf/proto"
+	"net"
+	"sync"
+	"time"
 )
 
 type ContextState string
@@ -80,7 +80,6 @@ type Context interface {
 
 	// String() is nice to have
 	fmt.Stringer
-
 }
 
 // ContextHandler interface defines the contract for context state transition event(s)

@@ -1,11 +1,11 @@
 package bus
 
 import (
+	"errors"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 	"net"
 	"time"
-	"errors"
-	"github.com/golang/protobuf/proto"
 )
 
 func dial(transport string, addr string, ctx *socketContext) error {
@@ -27,13 +27,15 @@ func dial(transport string, addr string, ctx *socketContext) error {
 
 func redial(ctx *socketContext) {
 
+	if ctx.State() != Reopening {
+		return
+	}
+
 	ctx.rcCount++
 
 	err := dial(ctx.e.Transport(), ctx.resolvedDest, ctx)
 
 	if err != nil {
-
-		ctx.setState(NetworkClosed)
 
 		_, c, d := ctx.Endpoint().ShouldReconnect()
 

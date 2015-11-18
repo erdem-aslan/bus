@@ -1,10 +1,10 @@
 package bus
 
 import (
-	"net"
 	"bufio"
 	"encoding/binary"
 	"github.com/golang/protobuf/proto"
+	"net"
 )
 
 func startNewReader(ctx *socketContext) <-chan proto.Message {
