@@ -75,7 +75,7 @@ func TestRequest(t *testing.T) {
 		t.Fail()
 	}
 
-	time.Sleep(time.Millisecond * 50)
+	time.Sleep(time.Millisecond * 500)
 }
 
 func TestResponse(t *testing.T) {
@@ -168,7 +168,6 @@ func TestDelayedRequestCancel(t *testing.T) {
 
 }
 
-
 func BenchmarkTestTCPEndpoint(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
@@ -236,6 +235,10 @@ func (e *TestEndpoint) PrototypeInstance() proto.Message {
 
 func (e *TestEndpoint) ShouldReconnect() (bool, int, time.Duration) {
 	return e.reconnect, e.maxRecCount, e.recDelay
+}
+
+func (e *TestEndpoint) ShouldThrottle() ThrottlingHandler {
+	return nil
 }
 
 func (e *TestEndpoint) MessageHandler() MessageHandler {

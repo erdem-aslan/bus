@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/golang/protobuf/proto"
+	"log"
 	"net"
 	"time"
 )
@@ -131,7 +132,7 @@ func serveUdp(e Endpoint) error {
 
 func serveWs(e Endpoint) error {
 	//@todo
-	return nil
+	return errors.New("not implemented")
 }
 
 func accept(l net.Listener, e Endpoint, quit <-chan struct{}) {
@@ -168,8 +169,8 @@ infinite:
 		}
 
 		scLock.Lock()
-		defer scLock.Unlock()
 		servedContexts[ctx.ctxId] = ctx
+		scLock.Unlock()
 
 		ctx.setState(Opening)
 
@@ -194,10 +195,6 @@ func startMainLoop(ctx *socketContext) {
 			case message, readOpen = <-rc:
 
 				if !readOpen {
-
-					if message != nil {
-						go ctx.e.MessageHandler().HandleMessage(ctx, message)
-					}
 
 					ctx.netQuit <- struct{}{}
 
@@ -273,11 +270,18 @@ func quitWriter(ctx *socketContext, pwc chan<- *busPromise, wc chan<- *busPromis
 
 	close(pwc)
 	close(wc)
+
 	ctx.ws <- struct{}{}
 
-	scLock.Lock()
-	delete(servedContexts, ctx.ctxId)
-	scLock.Unlock()
+	if ctx.served {
+		scLock.Lock()
+		delete(servedContexts, ctx.ctxId)
+		scLock.Unlock()
+	} else {
+		cLock.Lock()
+		delete(contexts, ctx.ctxId)
+		cLock.Lock()
+	}
 
 }
 

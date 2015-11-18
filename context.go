@@ -41,7 +41,7 @@ var (
 
 // Every endpoint has a dedicated Context, depending on the underlying transport, implementation may vary.
 //
-// Send methods return MessagePromise which provides a way of cancellation.
+// Send methods return a Promise which provides a way of cancellation.
 // Send methods also returns error if Context is closed and/or closing.
 //
 // All exposed methods accepts a func, ReportFunc, which will be executed at the end of the messages' life cycles.

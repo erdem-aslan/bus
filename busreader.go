@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/binary"
 	"github.com/golang/protobuf/proto"
-	"net"
 )
 
 func startNewReader(ctx *socketContext) <-chan proto.Message {
@@ -12,14 +11,12 @@ func startNewReader(ctx *socketContext) <-chan proto.Message {
 	rc := make(chan proto.Message)
 	ctx.rs = make(chan struct{})
 
-	bufferedIO := bufio.NewReader(ctx.conn)
+	go func(ctx *socketContext, rc chan proto.Message) {
 
-	protoMessage := proto.Clone(ctx.Endpoint().PrototypeInstance())
-
-	go func() {
+		reader := bufio.NewReader(ctx.conn)
+		protoMessage := proto.Clone(ctx.Endpoint().PrototypeInstance())
 
 		for {
-
 			select {
 
 			case <-ctx.rs:
@@ -27,7 +24,15 @@ func startNewReader(ctx *socketContext) <-chan proto.Message {
 
 			default:
 
-				err := read(bufferedIO, protoMessage, rc)
+				length, frErr := readFrame(ctx)
+
+				if frErr != nil {
+					ctx.setState(NetworkClosed)
+					close(rc)
+					return
+				}
+
+				err := readBody(length, reader, protoMessage, rc)
 
 				if err != nil {
 					ctx.setState(NetworkClosed)
@@ -36,26 +41,50 @@ func startNewReader(ctx *socketContext) <-chan proto.Message {
 				}
 			}
 		}
-	}()
+	}(ctx, rc)
 
 	return rc
 
 }
 
-func read(b *bufio.Reader, m proto.Message, readChan chan<- proto.Message) error {
+func readFrame(ctx *socketContext) (uint64, error) {
 
-	messageLength, err := binary.ReadUvarint(b)
+	singleByte := make([]byte, 1)
+	maxBuffer := make([]byte, 0, binary.MaxVarintLen64)
 
-	if err != nil {
-		return wrapReadErr(err)
+	for {
+		read, err := ctx.conn.Read(singleByte)
+
+
+		if err != nil {
+			return 0, err
+		}
+
+		if read == 0 {
+			return 0, BusError_IO
+		}
+
+		maxBuffer = append(maxBuffer, singleByte...)
+
+		hasMoreBytes := singleByte[0]&0x80 != 0
+
+		if !hasMoreBytes {
+			length, _ := proto.DecodeVarint(maxBuffer)
+
+			if length == 0 {
+				return 0, BusError_IO
+			}
+			return length, nil
+		}
 	}
+}
 
-	messageBody := make([]byte, messageLength)
+func readBody(length uint64, b *bufio.Reader, m proto.Message, readChan chan<- proto.Message) error {
 
-	var count uint64
+	messageBody := make([]byte, length)
 
-	// There are multiple ways for draining network buffer
-	// and this is one of them (very opinionated one).
+	var count int
+
 	for {
 		r, err := b.Read(messageBody)
 
@@ -63,15 +92,15 @@ func read(b *bufio.Reader, m proto.Message, readChan chan<- proto.Message) error
 			return BusError_IO
 		}
 
-		count += uint64(r)
+		count += r
 
-		if count == messageLength {
+		if count == int(length) {
 			break
 		}
 
 	}
 
-	err = proto.Unmarshal(messageBody, m)
+	err := proto.Unmarshal(messageBody, m)
 
 	if err != nil {
 		return BusError_FailedUnmarshalling
@@ -80,15 +109,5 @@ func read(b *bufio.Reader, m proto.Message, readChan chan<- proto.Message) error
 	readChan <- m
 
 	return nil
-
-}
-
-func wrapReadErr(err error) error {
-
-	if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
-		return nil
-	} else {
-		return BusError_IO
-	}
 
 }

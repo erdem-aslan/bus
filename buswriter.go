@@ -27,7 +27,7 @@ func startNewWriter(ctx *socketContext) (<-chan error, chan<- *busPromise, chan<
 
 		defer ctx.conn.Close()
 
-		b := proto.NewBuffer(make([]byte, 4096))
+		b := proto.NewBuffer(make([]byte, 0, 4096))
 
 	infinite:
 		for {
@@ -59,6 +59,7 @@ func startNewWriter(ctx *socketContext) (<-chan error, chan<- *busPromise, chan<
 
 				case promise, ok := <-pwc:
 					if ok {
+
 						err := write(promise, b, writer)
 						if err != nil {
 							wec <- err
@@ -105,7 +106,14 @@ func write(promise *busPromise, b *proto.Buffer, writer *bufio.Writer) (err erro
 
 	}
 
-	writer.Write(b.Bytes())
+	_, writeErr := writer.Write(b.Bytes())
+
+	if writeErr != nil {
+		b.Reset()
+		promise.setState(FailedTransport, BusError_IO)
+		return BusError_IO
+	}
+
 	err = writer.Flush()
 
 	// write error is fatal, remote endpoint may try to decode malformed bytes.

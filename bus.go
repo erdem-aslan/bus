@@ -32,7 +32,7 @@ var (
 	contexts map[string]*socketContext = make(map[string]*socketContext)
 
 	// Similar to contexts (client side contexts), servedContexts holds the references of 'live' contexts currently served.
-	servedContexts map[string]Context = make(map[string]Context)
+	servedContexts map[string]*socketContext = make(map[string]*socketContext)
 
 	// key = endpointId, value net.Listener.
 	endpointListeners map[string]*listenerShutdown = make(map[string]*listenerShutdown)
@@ -76,8 +76,8 @@ func DialEndpoint(e Endpoint) (Context, error) {
 	}
 
 	cLock.Lock()
-	defer cLock.Unlock()
 	contexts[cKey] = ctx
+	cLock.Unlock()
 
 	return ctx, nil
 }
@@ -85,7 +85,7 @@ func DialEndpoint(e Endpoint) (Context, error) {
 // Idiomatic entry point for client side communication for http(s) endpoints.
 func DialHttpEndpoint(e HttpEndpoint) (Context, error) {
 	//@todo
-	return nil, nil
+	return nil, errors.New("Not implemented")
 }
 
 // Idiomatic function for server side communication via Bus

@@ -14,7 +14,7 @@ const (
 	Json
 )
 
-// Endpoint interface defines the contract for various endpoints with different socket transports.
+// Endpoint interface defines the contract for various endpoints for different socket transports.
 type Endpoint interface {
 
 	// Client side;
@@ -30,7 +30,7 @@ type Endpoint interface {
 	//
 	// Server side;
 	//
-	// Your Endpoint implementation has to return non-"" consistent Id values.
+	// Your Endpoint implementation has to return non "", consistent Id values.
 	//
 	// Usually frameworks/libraries guard themselves by encapsulating their internal logic by not exposing states which represents
 	// uniqueness, Bus is not one of them. If you don't provide an Id or Id() returns nil or returns different values for each call,
@@ -68,7 +68,37 @@ type Endpoint interface {
 	// This method is used only for client side.
 	ShouldReconnect() (bool, int, time.Duration)
 
+	// Return nil if you don't want any throttling.
+	// Check documentation of ThrottlingHandler interface.
+	ShouldThrottle() ThrottlingHandler
+
 	HandlerProvider
+}
+
+type ThrottlingStrategy string
+
+const (
+	BusTs_MPS ThrottlingStrategy = "Message-Per-Second"
+	BusTs_BPS                    = "Bandwidth-Per-Second"
+)
+
+// Handler interface for throttling, optional for all endpoints
+// While, MPS strategy should be deterministic, BPS is generally best effort.
+//
+// Once an endpoint is passed to Bus functions, during live period of the endpoint,
+// throttling values are final regardless of different values you return from your implementation
+type ThrottlingHandler interface {
+
+	// MPS or BPS
+	Strategy() ThrottlingStrategy
+
+	// BusTS_MPS: Number of incoming messages to be processed per second.
+	// BusTS_BPS: Number of incoming bytes to be read per second.
+	IncomingLimitPerSecond() int
+
+	// BusTS_MPS: Number of outgoing messages to be sent in one second.
+	// BusTS_BPS: Number of outgoing bytes to be written.
+	OutgoingLimitPerSecond() int
 }
 
 type HandlerProvider interface {
@@ -83,14 +113,27 @@ type HandlerProvider interface {
 // HttpEndpoint interface for http|https transport types
 type HttpEndpoint interface {
 
-	// Returns the url of the http(s) endpoint
+	// Used for websockets
+	Origin() string
+
+	// Returns the url of the http(s) and websocket endpoints
 	ResourceUrl() string
 
-	// post|put|get types supported, although in a RESTful perspective, method type 'get' should not be used
+	// post|put|get types supported
 	Method() string
 
-	// Currently Protobuf and Json payload types are supported over http|https endpoints
+	// Currently Protobuf and Json payload types are supported over http|https|ws endpoints
 	PayloadType() PayloadType
+
+	// Return nil if you don't want any throttling.
+	// Check documentation of ThrottlingHandler interface.
+	ShouldThrottle() ThrottlingHandler
+
+	// Returns 3 parameters;
+	// reconnect true|false, max attempt count between disconnects, delay between attempts.
+	// If you provide zero or negative max attempt count, Bus will try reconnecting forever
+	// This method is used only for client side and valid for websocket endpoints only.
+	ShouldReconnect() (bool, int, time.Duration)
 
 	HandlerProvider
 }
