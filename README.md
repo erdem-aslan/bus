@@ -12,8 +12,6 @@ All exposed messaging methods / functions are, unless explicitly documented, wor
 
 If you are coming from Java or a JVM based language, you may find some similarities with Netty framework but Bus is more lightweight in terms of both resources and functionality, so tiny means tiny.
 
-Check https://godoc.org/github.com/gladmir/bus for detailed documentation about exposed interfaces / functions / structs
-
 While, internals are still changing (primarily for increasing readability and performance), declared interfaces and public APIs are locked / final so you can safely start using Bus.
 More importantly, if you have a feature idea that extends (or composes ?) the current feature set without breaking the API, feel free to submit a change request or a pull request.
 
@@ -33,6 +31,8 @@ More importantly, if you have a feature idea that extends (or composes ?) the cu
 Every network node, server or client, is defined via **Endpoint** and **HttpEndpoint** interfaces in Bus. Implementations of these interfaces are your entry to the framework.
 
 ***Endpoint***
+
+
 ```
     type Endpoint interface {
 
@@ -95,6 +95,7 @@ Every network node, server or client, is defined via **Endpoint** and **HttpEndp
  	HandlerProvider
  }
 ```
+
 
 ***HttpEndpoint***
 
@@ -224,9 +225,13 @@ Bus handles framing via prepending payload size but with a twist and the twist p
 
 There are two options for length based framing;
 
-_Fixed-sized:_ This option requires constant amount of bytes to be prepended, lets say 4 bytes for regular ints, 8 bytes for int64. If you message's size fits in to 2 bytes, the rest of the bytes are obviously will be wasted over the wire.
+**_Fixed-sized:_**:
 
-_Dynamic-sized:_ With dynamic sizing, Varints encoding is used for framing. No excess waste is transmitted to network and virtually any size of payload can be streamed over the wire.
+ This option requires constant amount of bytes to be prepended, lets say 4 bytes for regular ints, 8 bytes for int64. If you message's size fits in to 2 bytes, the rest of the bytes are obviously will be wasted over the wire.
+
+**_Dynamic-sized:_**:
+
+ With dynamic sizing, Varints encoding is used for framing. No excess waste is transmitted to network and virtually any size of payload can be streamed over the wire.
 
 While, fixed-size framing is a more portable solution, it has its own cavets, especially when you are streaming messages with relatively small sizes.
 
