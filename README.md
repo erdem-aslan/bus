@@ -148,7 +148,7 @@ type MessageHandler interface {
 
 ```
 
-ContextHandler interface also exposes a single method, is optional if you don't interested in Context state updates like _Opening_,_Open_ etc.
+ContextHandler interface also exposes a single method, is optional if you don't interested in Context state updates like _Opening_, _Open_ etc.
 
 ```
 // ContextHandler interface defines the contract for context state transition event(s)
