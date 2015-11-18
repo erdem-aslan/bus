@@ -227,7 +227,7 @@ There are two options for length based framing;
 
 **_Fixed-sized:_**:
 
- This option requires constant amount of bytes to be prepended, lets say 4 bytes for regular ints, 8 bytes for int64. If you message's size fits in to 2 bytes, the rest of the bytes are obviously will be wasted over the wire.
+ This option requires constant amount of bytes to be prepended, lets say 4 bytes for regular ints, 8 bytes for int64. If your message's size fits in to 2 bytes, the rest of the bytes are obviously will be wasted over the wire.
 
 **_Dynamic-sized:_**:
 
