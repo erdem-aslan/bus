@@ -167,7 +167,6 @@ type testContextHandler struct {
 }
 
 func (h *testContextHandler) ContextStateChanged(ctx Context, s ContextState) {
-	log.Println(ctx,s)
 }
 
 type testMessageHandler struct {
