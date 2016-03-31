@@ -8,14 +8,14 @@ import (
 
 func startNewWriter(ctx *socketContext) (<-chan error, chan<- *busPromise, chan<- *busPromise) {
 
-	bs := ctx.Endpoint().BufferSize()
+	bs := ctx.Endpoint().BufferSize
 
 	if bs < 0 {
 		bs = 0
 	}
 
-	wc := make(chan *busPromise, ctx.e.BufferSize())
-	pwc := make(chan *busPromise, ctx.e.BufferSize())
+	wc := make(chan *busPromise, bs)
+	pwc := make(chan *busPromise, bs)
 
 	wec := make(chan error)
 

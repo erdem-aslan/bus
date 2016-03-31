@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/golang/protobuf/proto"
-	"log"
 	"net"
 	"time"
 )
@@ -34,11 +33,12 @@ func redial(ctx *socketContext) {
 
 	ctx.rcCount++
 
-	err := dial(ctx.e.Transport(), ctx.resolvedDest, ctx)
+	err := dial(ctx.e.Transport, ctx.resolvedDest, ctx)
 
 	if err != nil {
 
-		_, c, d := ctx.Endpoint().ShouldReconnect()
+		c := ctx.Endpoint().MaxAttemptCount
+		d := ctx.Endpoint().DelayDuration
 
 		if c == 0 || ctx.rcCount < c {
 
@@ -51,11 +51,11 @@ func redial(ctx *socketContext) {
 	}
 }
 
-func serve(e Endpoint) error {
+func serve(e *Endpoint) error {
 
 	var err error
 
-	switch e.Transport() {
+	switch e.Transport {
 	case "tcp":
 		err = serveTcp(e)
 	case "udp":
@@ -63,13 +63,13 @@ func serve(e Endpoint) error {
 	case "ws":
 		err = serveWs(e)
 	default:
-		err = errors.New(fmt.Sprintf("Unhandled transport type for serving: %s", e.Transport()))
+		err = errors.New(fmt.Sprintf("Unhandled transport type for serving: %s", e.Transport))
 	}
 
 	return err
 }
 
-func serveTcp(e Endpoint) error {
+func serveTcp(e *Endpoint) error {
 
 	address, err := resolveAddress(e)
 
@@ -87,7 +87,7 @@ func serveTcp(e Endpoint) error {
 
 	elLock.Lock()
 
-	endpointListeners[e.Id()] = &listenerShutdown{
+	endpointListeners[e.Id] = &listenerShutdown{
 		l: l,
 		q: quit,
 	}
@@ -100,7 +100,7 @@ func serveTcp(e Endpoint) error {
 
 }
 
-func serveUdp(e Endpoint) error {
+func serveUdp(e *Endpoint) error {
 	address, err := resolveAddress(e)
 
 	if err != nil {
@@ -117,7 +117,7 @@ func serveUdp(e Endpoint) error {
 
 	elLock.Lock()
 
-	endpointListeners[e.Id()] = &listenerShutdown{
+	endpointListeners[e.Id] = &listenerShutdown{
 		l: l,
 		q: quit,
 	}
@@ -130,12 +130,12 @@ func serveUdp(e Endpoint) error {
 
 }
 
-func serveWs(e Endpoint) error {
+func serveWs(e *Endpoint) error {
 	//@todo
 	return errors.New("not implemented")
 }
 
-func accept(l net.Listener, e Endpoint, quit <-chan struct{}) {
+func accept(l net.Listener, e *Endpoint, quit <-chan struct{}) {
 
 infinite:
 	for {
@@ -160,9 +160,9 @@ infinite:
 
 		ctx := &socketContext{
 			conn:     conn,
-			ctxId:    e.Id() + "-" + conn.RemoteAddr().String() + "-" + e.Transport(),
+			ctxId:    e.Id + "-" + conn.RemoteAddr().String() + "-" + e.Transport,
 			e:        e,
-			ctxQueue: make(chan *busPromise, e.BufferSize()),
+			ctxQueue: make(chan *busPromise, e.BufferSize),
 			served:   true,
 			ctxQuit:  make(chan struct{}),
 			netQuit:  make(chan struct{}),
@@ -200,7 +200,9 @@ func startMainLoop(ctx *socketContext) {
 
 					if !ctx.served {
 
-						r, c, d := ctx.Endpoint().ShouldReconnect()
+						r:= ctx.Endpoint().ShouldReconnect
+						c:= ctx.Endpoint().MaxAttemptCount
+						d:= ctx.Endpoint().DelayDuration
 
 						if r && (c == 0 || ctx.rcCount < c) {
 
@@ -216,7 +218,7 @@ func startMainLoop(ctx *socketContext) {
 					break infinite
 				}
 
-				go ctx.e.MessageHandler().HandleMessage(ctx, message)
+				go ctx.e.M.HandleMessage(ctx, message)
 			}
 		}
 

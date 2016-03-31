@@ -76,7 +76,7 @@ type Context interface {
 	CloseGracefully(t time.Duration)
 
 	// Returns the endpoint which this context attached to.
-	Endpoint() Endpoint
+	Endpoint() *Endpoint
 
 	// String() is nice to have
 	fmt.Stringer
@@ -106,7 +106,7 @@ type socketContext struct {
 	rcCount int
 	served  bool
 
-	e     Endpoint
+	e     *Endpoint
 	conn  net.Conn
 	state ContextState
 
@@ -255,7 +255,7 @@ func (c *socketContext) CloseGracefully(t time.Duration) {
 	c.ctxQuit <- struct{}{}
 }
 
-func (c *socketContext) Endpoint() Endpoint {
+func (c *socketContext) Endpoint() *Endpoint {
 	return c.e
 }
 
@@ -279,7 +279,7 @@ func (c *socketContext) setState(s ContextState) {
 
 func (c *socketContext) notifyLc(s ContextState) {
 
-	l := c.e.ContextHandler()
+	l := c.e.C
 
 	if l == nil {
 		return
@@ -308,11 +308,11 @@ func validateContextState(c *socketContext) error {
 		// len(chan) call is not synchronized so we are estimating a %90 buffer capacity to be full,
 		// just to be on the safe side.
 
-		if c.Endpoint().BufferSize() <= 0 {
+		if c.Endpoint().BufferSize <= 0 {
 			// Endpoint does not configured to be buffered
 			return BusError_ContextReconnecting
 
-		} else if float64(len(c.ctxQueue)) >= float64(c.Endpoint().BufferSize())*0.9 {
+		} else if float64(len(c.ctxQueue)) >= float64(c.Endpoint().BufferSize)*0.9 {
 
 			return BusError_ContextReconnectingBufferFull
 		}

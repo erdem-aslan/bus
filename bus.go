@@ -1,4 +1,4 @@
-// Bus, acts as a messaging "bus" with complete transporting support for protocol buffer objects.
+// Package bus, acts as a messaging "bus" with complete transporting support for protocol buffer objects.
 // It handles the framing, reliability of connections (tcp|udp|ws (websocket) endpoints), throttling (all endpoints) and  ordered delivery (all endpoints) of messages.
 //
 // Although, messaging structure is defined via protobuf, since protobuf supports JSON, serialization and deserialization may be in JSON format
@@ -41,7 +41,6 @@ var (
 	scLock sync.RWMutex
 	elLock sync.RWMutex
 
-	// Endpoint Errors
 	BusError_InvalidTransport          = errors.New("Invalid transport")
 	BusError_DestInfoMissing           = errors.New("Missing fqdn/ip or port")
 	BusError_EndpointAlreadyRegistered = errors.New("Endpoint already registered")
@@ -49,8 +48,8 @@ var (
 	BusError_MissingMessageHandler     = errors.New("Missing message handler implementation")
 )
 
-// Idiomatic entry point for client side communication for socket endpoints.
-func DialEndpoint(e Endpoint) (Context, error) {
+// DialEndpoint, Idiomatic entry point for client side communication for socket endpoints.
+func DialEndpoint(e *Endpoint) (Context, error) {
 
 	destAddress, cKey, err := evalAddressAndKey(e)
 
@@ -62,14 +61,14 @@ func DialEndpoint(e Endpoint) (Context, error) {
 		e:            e,
 		resolvedDest: destAddress,
 		ctxId:        cKey,
-		ctxQueue:     make(chan *busPromise, e.BufferSize()),
+		ctxQueue:     make(chan *busPromise, e.BufferSize),
 		ctxQuit:      make(chan struct{}),
 		netQuit:      make(chan struct{}),
 	}
 
 	ctx.setState(Opening)
 
-	err = dial(e.Transport(), destAddress, ctx)
+	err = dial(e.Transport, destAddress, ctx)
 
 	if err != nil {
 		return nil, err
@@ -82,13 +81,13 @@ func DialEndpoint(e Endpoint) (Context, error) {
 	return ctx, nil
 }
 
-// Idiomatic entry point for client side communication for http(s) endpoints.
-func DialHttpEndpoint(e HttpEndpoint) (Context, error) {
+// DialHttpEndpoint, Idiomatic entry point for client side communication for http(s) endpoints.
+func DialWebEndpoint(e *WebEndpoint) (Context, error) {
 	//@todo
 	return nil, errors.New("Not implemented")
 }
 
-// Idiomatic function for server side communication via Bus
+// Serve, Idiomatic function for server side communication via Bus
 //
 // As opposed to Dial, Serve provides the contexts attached to given endpoints within ContextHandler
 // 'Opening' callback for the first time, due to the nature of being server side.
@@ -109,42 +108,42 @@ func DialHttpEndpoint(e HttpEndpoint) (Context, error) {
 //
 // Serve func never blocks and returns the initial errors, if any, via ResultFunc func callback in a separate goroutine.
 // You can pass nil for ResultFunc func parameter if you don't want an error callback.
-func Serve(r ResultFunc, e ...Endpoint) {
+func Serve(r ResultFunc, e ...*Endpoint) {
 
-	for i, v := range e {
+	for _, v := range e {
 
 		err := serve(v)
 
 		if err != nil && r != nil {
-			go r(e[i], err)
+			go r(v, err)
 		}
 	}
 }
 
-// Func for initialization and shutdown callback for endpoints on server side bus.
-type ResultFunc func(e Endpoint, err error)
+// ResultFunc for initialization and shutdown callback for endpoints on server side bus.
+type ResultFunc func(e *Endpoint, err error)
 
-// Stops endpoint(s)
+// StopServing, Stops endpoint(s)
 // Open contexts will be closed and finally corresponding server side endpoints will be shutdown.
 // Only errors which happen during the endpoint shutdowns will be reported via ResultFunc.
 //
 // As usual, pass nil ResultFunc if you don't want/interested an/in error callback.
-func StopServing(r ResultFunc, endpoints ...Endpoint) {
+func StopServing(r ResultFunc, endpoints ...*Endpoint) {
 
 	for _, e := range endpoints {
 
-		l := endpointListeners[e.Id()]
+		l := endpointListeners[e.Id]
 
 		if l == nil {
 			if r != nil {
-				r(e, errors.New(fmt.Sprintf("Endpoint already stopped or never served with id: %s", e.Id())))
+				r(e, errors.New(fmt.Sprintf("Endpoint already stopped or never served with id: %s", e.Id)))
 			}
 		}
 
 		// close the contexts first
 
 		for _, c := range servedContexts {
-			if c.Endpoint().Id() == e.Id() {
+			if c.Endpoint().Id == e.Id {
 				c.Close()
 			}
 		}
@@ -154,7 +153,7 @@ func StopServing(r ResultFunc, endpoints ...Endpoint) {
 	}
 }
 
-// Stops all contexts and endpoints currently live and running in bus.
+// StopServingAll, Stops all contexts and endpoints currently live and running in bus.
 func StopServingAll() {
 
 	for _, c := range servedContexts {
@@ -167,7 +166,7 @@ func StopServingAll() {
 	}
 }
 
-// Short hand func for;
+// Stop, Short hand func for;
 //  - Close all client and server contexts
 //  - Close all served endpoints
 //  - Report back any error if ResultFunc is not nil.

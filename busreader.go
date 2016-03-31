@@ -14,7 +14,7 @@ func startNewReader(ctx *socketContext) <-chan proto.Message {
 	go func(ctx *socketContext, rc chan proto.Message) {
 
 		reader := bufio.NewReader(ctx.conn)
-		protoMessage := proto.Clone(ctx.Endpoint().PrototypeInstance())
+		protoMessage := proto.Clone(ctx.Endpoint().P)
 
 		for {
 			select {

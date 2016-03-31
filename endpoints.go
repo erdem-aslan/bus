@@ -15,11 +15,12 @@ const (
 )
 
 // Endpoint interface defines the contract for various endpoints for different socket transports.
-type Endpoint interface {
-
+type Endpoint struct {
+	// Id
+	//
 	// Client side;
 	//
-	// Optional, you may choose to return ""
+	// Optional
 	//
 	// Id is present for correlation between endpoints and contexts.
 	// More practical usage of different endpointIds is when you need to connect to the same endpoint with same ip/port/transport.
@@ -30,7 +31,7 @@ type Endpoint interface {
 	//
 	// Server side;
 	//
-	// Your Endpoint implementation has to return non "", consistent Id values.
+	// Mandatory
 	//
 	// Usually frameworks/libraries guard themselves by encapsulating their internal logic by not exposing states which represents
 	// uniqueness, Bus is not one of them. If you don't provide an Id or Id() returns nil or returns different values for each call,
@@ -39,158 +40,141 @@ type Endpoint interface {
 	// So assign an Id and always return the same value for individual endpoint implementations of yours.
 	//
 	// Package level Stop... functions all depend on EndpointId parameter in order to stop serving endpoints.
-	Id() string
+	Id              string
 
 	// Address information, ipv4|ipv6
-	Address() string
+	Address         string
 
 	// Port information
-	Port() int
+	Port            int
 
-	// Fully qualified domain name information.
+	// FQDN, Fully qualified domain name information.
 	// Implementors may choose to provide Hostname (FQDN) instead of Address, bus will try to resolve the FQDN if provided.
-	FQDN() string
+	FQDN            string
 
 	// Transport may be one of "tcp|udp|ws"
-	Transport() string
+	Transport       string
 
 	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
 	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
 	// buffer is full.
-	BufferSize() int
+	BufferSize      int
 
-	// PrototypeInstance should return a zero value of User's Protocol Buffer object.
-	PrototypeInstance() proto.Message
 
-	// Returns 3 parameters;
 	// reconnect true|false, max attempt count between disconnects, delay between attempts.
 	// If you provide zero or negative max attempt count, Bus will try reconnecting forever
 	// This method is used only for client side.
-	ShouldReconnect() (bool, int, time.Duration)
+	ShouldReconnect bool
+	MaxAttemptCount int
+	DelayDuration   time.Duration
 
-	// Return nil if you don't want any throttling.
+	// PrototypeInstance should return a zero value of User's Protocol Buffer object.
+	P               proto.Message
+
 	// Check documentation of ThrottlingHandler interface.
-	ShouldThrottle() ThrottlingHandler
+	T               ThrottlingHandler
 
-	HandlerProvider
+	// Check documentation of MessageHandler interface.
+	M               MessageHandler
+
+	// Check documentation of ContextHandler interface.
+	C               ContextHandler
+}
+
+// WebEndpoint interface for http|https|ws
+type WebEndpoint struct {
+	// Used for websockets
+	Origin      string
+
+	// Returns the url of the http(s) and websocket endpoints
+	ResourceUrl string
+
+	// post|put|get types supported
+	Method      string
+
+	// Currently Protobuf and Json payload types are supported
+	PayloadType PayloadType
+
+	Endpoint
 }
 
 type ThrottlingStrategy string
 
 const (
 	BusTs_MPS ThrottlingStrategy = "Message-Per-Second"
-	BusTs_BPS                    = "Bandwidth-Per-Second"
+	BusTs_BPS = "Bytes-Per-Second"
 )
 
-// Handler interface for throttling, optional for all endpoints
+// Handler for throttling, optional for all endpoints
 // While, MPS strategy should be deterministic, BPS is generally best effort.
 //
 // Once an endpoint is passed to Bus functions, during live period of the endpoint,
 // throttling values are final regardless of different values you return from your implementation
-type ThrottlingHandler interface {
-
+type ThrottlingHandler struct {
 	// MPS or BPS
-	Strategy() ThrottlingStrategy
+	Strategy               ThrottlingStrategy
 
 	// BusTS_MPS: Number of incoming messages to be processed per second.
 	// BusTS_BPS: Number of incoming bytes to be read per second.
-	IncomingLimitPerSecond() int
+	IncomingLimitPerSecond int
 
-	// BusTS_MPS: Number of outgoing messages to be sent in one second.
+	// BusTS_MPS: Number of outgoing messages to be sent per second.
 	// BusTS_BPS: Number of outgoing bytes to be written.
-	OutgoingLimitPerSecond() int
-}
-
-type HandlerProvider interface {
-
-	// Mandatory MessageHandler implementation
-	MessageHandler() MessageHandler
-
-	// Optional ContextHandler implementation
-	ContextHandler() ContextHandler
-}
-
-// HttpEndpoint interface for http|https transport types
-type HttpEndpoint interface {
-
-	// Used for websockets
-	Origin() string
-
-	// Returns the url of the http(s) and websocket endpoints
-	ResourceUrl() string
-
-	// post|put|get types supported
-	Method() string
-
-	// Currently Protobuf and Json payload types are supported over http|https|ws endpoints
-	PayloadType() PayloadType
-
-	// Return nil if you don't want any throttling.
-	// Check documentation of ThrottlingHandler interface.
-	ShouldThrottle() ThrottlingHandler
-
-	// Returns 3 parameters;
-	// reconnect true|false, max attempt count between disconnects, delay between attempts.
-	// If you provide zero or negative max attempt count, Bus will try reconnecting forever
-	// This method is used only for client side and valid for websocket endpoints only.
-	ShouldReconnect() (bool, int, time.Duration)
-
-	HandlerProvider
+	OutgoingLimitPerSecond int
 }
 
 type listenerShutdown struct {
 	l net.Listener
-	q chan<- struct{}
+	q chan <- struct{}
 }
 
-func resolveAddress(e Endpoint) (string, error) {
+func resolveAddress(e *Endpoint) (string, error) {
 
-	if (e.FQDN() == "" && e.Address() == "") ||
-		e.Port() == 0 || e.Transport() == "" {
+	if (e.FQDN == "" && e.Address == "") ||
+	e.Port == 0 || e.Transport == "" {
 
 		return "", BusError_DestInfoMissing
 	}
 
-	t := e.Transport()
+	t := e.Transport
 
 	if t != "tcp" &&
-		t != "udp" &&
-		t != "ws" &&
-		t != "http" &&
-		t != "https" {
-
+	t != "udp" &&
+	t != "ws" &&
+	t != "http" &&
+	t != "https" {
 		return "", BusError_InvalidTransport
 	}
 
-	port := strconv.Itoa(e.Port())
+	port := strconv.Itoa(e.Port)
 
 	var address string
 
 	// FQDN has a priority over IP
-	if e.FQDN() != "" {
+	if e.FQDN != "" {
 
 		// resolve the fqdn
-		addrs, err := net.LookupHost(e.FQDN())
+		addrs, err := net.LookupHost(e.FQDN)
 
-		if err != nil && e.Address() == "" {
+		if err != nil && e.Address == "" {
 			return "", err
 		}
 
-		if len(addrs) == 0 && e.Address() == "" {
+		if len(addrs) == 0 && e.Address == "" {
 			return "", BusError_DestInfoMissing
 		}
 
 		address = addrs[0]
 
 	} else {
-		address = e.Address()
+		address = e.Address
 	}
 
 	return address + ":" + port, nil
 
 }
 
-func evalAddressAndKey(e Endpoint) (string, string, error) {
+func evalAddressAndKey(e *Endpoint) (string, string, error) {
 
 	address, err := resolveAddress(e)
 
@@ -198,7 +182,7 @@ func evalAddressAndKey(e Endpoint) (string, string, error) {
 		return "", "", err
 	}
 
-	cKey := e.Id() + "-" + address + "-" + e.Transport()
+	cKey := e.Id + "-" + address + "-" + e.Transport
 
 	cLock.RLock()
 	defer cLock.RUnlock()
@@ -206,11 +190,11 @@ func evalAddressAndKey(e Endpoint) (string, string, error) {
 		return "", "", BusError_EndpointAlreadyRegistered
 	}
 
-	if e.PrototypeInstance() == nil {
+	if e.P == nil {
 		return "", "", BusError_MissingPrototypeInstance
 	}
 
-	if e.MessageHandler() == nil {
+	if e.M == nil {
 		return "", "", BusError_MissingMessageHandler
 	}
 

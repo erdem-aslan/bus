@@ -13,7 +13,7 @@ All exposed messaging methods / functions are, unless explicitly documented, wor
 If you are coming from Java or a JVM based language, you may find some similarities with Netty framework but Bus is more lightweight in terms of both resources and functionality, so tiny means tiny.
 
 While, internals are still changing (primarily for increasing readability and performance), declared interfaces and public APIs are locked / final so you can safely start using Bus.
-More importantly, if you have a feature idea that extends (or composes ?) the current feature set without breaking the API, feel free to submit a change request or a pull request.
+More importantly, if you have a feature idea that extends (or composes ?) the current feature set without breaking the API, feel free to submit a pull request.
 
 
 ## Interfaces
