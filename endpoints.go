@@ -71,13 +71,13 @@ type Endpoint struct {
 	// PrototypeInstance should return a zero value of User's Protocol Buffer object.
 	P               proto.Message
 
-	// Check documentation of ThrottlingHandler interface.
+	// Optional, Check documentation of ThrottlingHandler interface.
 	T               ThrottlingHandler
 
-	// Check documentation of MessageHandler interface.
+	// Mandatory, Check documentation of MessageHandler interface.
 	M               MessageHandler
 
-	// Check documentation of ContextHandler interface.
+	// Optional, Check documentation of ContextHandler interface.
 	C               ContextHandler
 }
 

@@ -6,7 +6,7 @@ Bus in a nutshell, acts as a messaging "bus" with complete transporting support 
 It handles the framing, reliability of connections (tcp|udp|ws (websocket) endpoints), throttling (all endpoints) and  ordered delivery (all endpoints) of messages.
 
 Although, messaging structure is defined via protobuf, since protobuf supports JSON, serialization and deserialization may be in JSON format
-for http|https endpoints if desired.
+for http|https|ws endpoints if desired.
 
 All exposed messaging methods / functions are, unless explicitly documented, work asynchronously. In Bus, everything is a 'Promise'.
 
@@ -22,116 +22,102 @@ More importantly, if you have a feature idea that extends (or composes ?) the cu
 
  ***Promises :*** Message cancellation and state exposure.
 
- ***Endpoints :*** Network nodes representing both client and server side interactions which are tcp,udp,ws and http(s)
-
  ***Handlers :*** Interfaces for event and state reporting asynchronously.
 
-### Endpoint interfaces
+### Endpoints
 
-Every network node, server or client, is defined via **Endpoint** and **HttpEndpoint** interfaces in Bus. Implementations of these interfaces are your entry to the framework.
+Every network node, server or client, is defined via **Endpoints** and **WebEndpoints**.
 
 ***Endpoint***
 
 
 ```
-    type Endpoint interface {
-
- 	// Client side;
- 	//
- 	// Optional, you may choose to return ""
- 	//
- 	// Id is present for correlation between endpoints and contexts.
- 	// More practical usage of different endpointIds is when you need to connect to the same endpoint with same ip/port/transport.
- 	//
- 	// Bus differentiates the endpoints by generating keys with;
- 	//
- 	//	[Id]-[ip:port]-[transport] for tcp|udp|ws and [Id]-[ip:port]-[resourceUrl] for http|https endpoints
- 	//
- 	// Server side;
- 	//
- 	// Your Endpoint implementation has to return non-"" consistent Id values.
- 	//
- 	// Usually frameworks/libraries guard themselves by encapsulating their internal logic by not exposing states which represents
- 	// uniqueness, Bus is not one of them. If you don't provide an Id or Id() returns "" or returns different values for each call,
- 	// your application will surely malfunction.
- 	//
- 	// So assign an Id and always return the same value for individual endpoint implementations of yours.
- 	//
- 	// Package level Stop... functions all depend on EndpointId parameter in order to stop serving endpoints.
- 	Id() string
-
- 	// Address information, ipv4|ipv6
- 	Address() string
-
- 	// Port information
- 	Port() int
-
- 	// Fully qualified domain name information.
- 	// Implementors may choose to provide Hostname (FQDN) instead of Address, bus will try to resolve the FQDN if provided.
- 	FQDN() string
-
- 	// Transport may be one of "tcp|udp|ws"
- 	Transport() string
-
- 	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
- 	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
- 	// buffer is full.
- 	BufferSize() int
-
- 	// PrototypeInstance should return a zero value of User's Protocol Buffer object.
- 	PrototypeInstance() proto.Message
-
- 	// Returns 3 parameters;
- 	// reconnect true|false, max attempt count between disconnects, delay between attempts.
- 	// If you provide zero or negative max attempt count, Bus will try reconnecting forever
- 	// This method is used only for client side.
- 	ShouldReconnect() (bool, int, time.Duration)
-
-    // Return nil if you don't want any throttling.
-    // Check documentation of ThrottlingHandler interface.
-    ShouldThrottle () ThrottlingHandler
-
-
- 	HandlerProvider
- }
-```
-
-
-***HttpEndpoint***
-
-```
-type HttpEndpoint interface {
-
-	// Returns the url of the http(s) endpoint
+type Endpoint struct {
+	// Id
 	//
-	// ex:  http://localhost/someProtocol/messages
-	//      https://localhost:9090/someOtherProtocol/inc/requests
+	// Client side;
 	//
-	Url() string
+	// Optional
+	//
+	// Id is present for correlation between endpoints and contexts.
+	// More practical usage of different endpointIds is when you need to connect to the same endpoint with same ip/port/transport.
+	//
+	// Bus differentiates the endpoints by generating keys with;
+	//
+	//	[Id]-[ip:port]-[transport] for tcp|udp|ws and [Id]-[ip:port]-[resourceUrl] for http|https endpoints
+	//
+	// Server side;
+	//
+	// Mandatory
+	//
+	// Usually frameworks/libraries guard themselves by encapsulating their internal logic by not exposing states which represents
+	// uniqueness, Bus is not one of them. If you don't provide an Id or Id() returns nil or returns different values for each call,
+	// your application will surely malfunction.
+	//
+	// So assign an Id and always return the same value for individual endpoint implementations of yours.
+	//
+	// Package level Stop... functions all depend on EndpointId parameter in order to stop serving endpoints.
+	Id              string
 
-	// post|put|get types supported
-	Method() string
+	// Address information, ipv4|ipv6
+	Address         string
 
-	// Currently Protobuf and Json payload types are supported over http|https endpoints
-	PayloadType() PayloadType
+	// Port information
+	Port            int
 
-	HandlerProvider
+	// FQDN, Fully qualified domain name information.
+	// Implementors may choose to provide Hostname (FQDN) instead of Address, bus will try to resolve the FQDN if provided.
+	FQDN            string
+
+	// Transport may be one of "tcp|udp|ws"
+	Transport       string
+
+	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
+	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
+	// buffer is full.
+	BufferSize      int
+
+
+	// reconnect true|false, max attempt count between disconnects, delay between attempts.
+	// If you provide zero or negative max attempt count, Bus will try reconnecting forever
+	// This method is used only for client side.
+	ShouldReconnect bool
+	MaxAttemptCount int
+	DelayDuration   time.Duration
+
+	// PrototypeInstance should return a zero value of User's Protocol Buffer object.
+	P               proto.Message
+
+	// Optional, Check documentation of ThrottlingHandler interface.
+	T               ThrottlingHandler
+
+	// Mandatory, Check documentation of MessageHandler interface.
+	M               MessageHandler
+
+	// Optional, Check documentation of ContextHandler interface.
+	C               ContextHandler
 }
 
 ```
 
-Both  interfaces compose another interface which is ***HandlerProvider***.
 
-***HandlerProvider :***
+***WebEndpoint***
 
 ```
-type HandlerProvider interface {
+type WebEndpoint struct {
+	// Used for websockets
+	Origin      string
 
-	// Mandatory MessageHandler implementation
-	MessageHandler() MessageHandler
+	// Returns the url of the http(s) and websocket endpoints
+	ResourceUrl string
 
-	// Optional ContextHandler implementation
-	ContextHandler() ContextHandler
+	// post|put|get types supported
+	Method      string
+
+	// Currently Protobuf and Json payload types are supported
+	PayloadType PayloadType
+
+	Endpoint
 }
 
 ```
@@ -205,11 +191,11 @@ type Context interface {
 	// Closes gracefully with timeout. Within provided duration, Bus will try to consume all messages while honoring
 	// the throttling if configured.
 	//
-	// Remaining messages that missed the grace period for sending, will be reported back as delivery failure.
+	// Remaining messages that missed the grace period for sending, will be report back as delivery failure.
 	CloseGracefully(t time.Duration)
 
 	// Returns the endpoint which this context attached to.
-	Endpoint() Endpoint
+	Endpoint() *Endpoint
 
 	// String() is nice to have
 	fmt.Stringer
@@ -221,7 +207,7 @@ type Context interface {
 
 If you are familiar to streaming based protocols, streaming bytes over the wire needs encapsulation, in other words _Framing_.
 
-Bus handles framing via prepending payload size but with a twist and the twist part is important if you are connecting to other systems written outside of Bus, even written other languages.
+Bus handles framing via preceding payload size but with a twist and the twist part is important if you are connecting to other systems written outside of Bus, even written other languages.
 
 There are two options for length based framing;
 
@@ -231,9 +217,9 @@ There are two options for length based framing;
 
 **_Dynamic-sized:_**:
 
- With dynamic sizing, Varints encoding is used for framing. No excess waste is transmitted to network and virtually any size of payload can be streamed over the wire.
+ With dynamic sizing, Varint encoding is used for framing. No excess waste is transmitted to network and virtually any size of payload can be streamed over the wire.
 
-While, fixed-size framing is a more portable solution, it has its own cavets, especially when you are streaming messages with relatively small sizes.
+While, fixed-size framing is a more portable solution, it has its own caveats, especially when you are streaming messages with relatively small sizes.
 
 Imagine streaming a message over the wire with a size of 10 bytes, which is quite normal for heartbeats / keep alives. With the fixed sizing overhead your packets would be nearly twice the size.
 
@@ -246,12 +232,12 @@ For further documentation about varints and their encoding;
 
 ## Bus Client ##
 
-So, we've implemented an endpoint and provided the MessageHandler. There are only two Package level functions exposed for connecting remote endpoints;
+There are only two Package level functions exposed for connecting remote endpoints;
 
 ```
-func DialEndpoint(e Endpoint) (Context, error)
+func DialEndpoint(e *Endpoint) (Context, error)
 
-func DialHttpEndpoint(e HttpEndpoint) (Context, error)
+func DialWebEndpoint(e *WebEndpoint) (Context, error)
 ```
 
 Well, that's it.
@@ -299,105 +285,48 @@ func Serve(r ResultFunc, e ...Endpoint)
 
 ## Usage ##
 
-```
-go get github.com/gladmir/bus
-
-go test -bench=. -test.v
-
-=== RUN   TestRequest
---- PASS: TestRequest (0.05s)
-=== RUN   TestResponse
---- PASS: TestResponse (0.05s)
-=== RUN   TestDelayedRequest
---- PASS: TestDelayedRequest (0.10s)
-=== RUN   TestDelayedRequestCancel
---- PASS: TestDelayedRequestCancel (0.10s)
-PASS
-BenchmarkTestTCPEndpoint-8	 1000000	      7581 ns/op
-ok  	github.com/gladmir/bus	7.925s
-
-```
-
-If any of the tests fails, check your available network interfaces, sample code and test cases depend on '127.0.0.1' interface.
-
 'Hello word' for networking? Well, here comes the ping request, pong response.
 
-So, lets implement ourselves an endpoint, as long as our implementation satisfies _Endpoint_, we can throw in anything we want (like t *testing.T for testing purposes);
+First of all we need to lay out our protocol via protobuf template and generate our code, below the test.proto;
 
 ```
-type TestEndpoint struct {
-	id             string
-	port           int
-	fqdn           string
-	address        string
-	transport      string
-	bufferSize     int
-	protoMessage   proto.Message
-	reconnect      bool
-	maxRecCount    int
-	recDelay       time.Duration
-	t              *testing.T
-	messageHandler *testMessageHandler
-	contextHandler *testContextHandler
-}
+        syntax = "proto3";
+        package bus;
 
-func (e *TestEndpoint) Id() string {
-	return e.id
-}
 
-func (e *TestEndpoint) Address() string {
-	return e.address
-}
+        message TestFrame {
 
-func (e *TestEndpoint) Port() int {
-	return e.port
-}
+            enum EventType {
+                PING = 0;
+                PONG = 1;
+            }
 
-func (e *TestEndpoint) FQDN() string {
-	return e.fqdn
-}
+            message Ping {
+                uint64 epoch = 1;
+            }
 
-func (e *TestEndpoint) Transport() string {
-	return e.transport
-}
+            message Pong {
+                uint64 epoch = 1;
+            }
 
-func (e *TestEndpoint) BufferSize() int {
-	return e.bufferSize
-}
+            EventType eventType = 1;
+            Ping ping = 2;
+            Pong pong = 3;
 
-func (e *TestEndpoint) PrototypeInstance() proto.Message {
-	return e.protoMessage
-}
 
-func (e *TestEndpoint) ShouldReconnect() (bool, int, time.Duration) {
-	return e.reconnect, e.maxRecCount, e.recDelay
-}
-
-func (e *TestEndpoint) ShouldThrottle() ThrottlingHandler {
-    return nil
-}
-
-func (e *TestEndpoint) MessageHandler() MessageHandler {
-	return e.messageHandler
-}
-
-func (e *TestEndpoint) ContextHandler() ContextHandler {
-	return e.contextHandler
-}
-
+        }
 ```
 
-And a MessageHandler for listening Ping requests over the wire;
+
+And also we need a MessageHandler implementation;
 
 ```
 type testMessageHandler struct {
-	t      *testing.T
 	client bool
 }
 
 func (m *testMessageHandler) HandleMessage(ctx Context, msg proto.Message) {
 
-    // ... process the message
 
     log.Println("Incoming message:", msg, "from ctx:", ctx)
 
@@ -429,7 +358,6 @@ And a ContextHandler for listening the state changes
 
 ```
 type testContextHandler struct {
-	t      *testing.T
 	client bool
 }
 
@@ -445,67 +373,56 @@ func (h *testContextHandler) ContextStateChanged(ctx Context, s ContextState) {
 Let's wrap up and start our Bus server and send a Ping request via DialEndpoint function.
 
 ```
-	clientEnd = &TestEndpoint{
-		id:           "test-server",
-		port:         9000,
-		address:      "127.0.0.1",
-		transport:    "tcp",
-		protoMessage: &TestFrame{},
-		reconnect:    false,
-		bufferSize:   100000,
+	clientEnd = &Endpoint{
+		Id:           "test-server",
+		Port:         9000,
+		Address:      "127.0.0.1",
+		Transport:    "tcp",
+		P: &TestFrame{},
+		BufferSize:   100000,
 	}
 
-	clientEnd.contextHandler = &testContextHandler{client: true}
-	clientEnd.messageHandler = &testMessageHandler{client: true}
+	clientEnd.C = &testContextHandler{client: true}
+	clientEnd.M = &testMessageHandler{client: true}
 
-	serverEnd = &TestEndpoint{
-		id:           "test-server",
-		port:         9000,
-		address:      "127.0.0.1",
-		transport:    "tcp",
-		protoMessage: &TestFrame{},
+	serverEnd = &Endpoint{
+		Id:           "test-server",
+		Port:         9000,
+		Address:      "127.0.0.1",
+		Transport:    "tcp",
+		P: &TestFrame{},
 	}
 
-	serverEnd.contextHandler = &testContextHandler{client: false}
-	serverEnd.messageHandler = &testMessageHandler{client: false}
+	serverEnd.C = &testContextHandler{client: false}
+	serverEnd.M = &testMessageHandler{client: false}
 
-	bus.Serve(nil, serverEnd)
+	Serve(nil, serverEnd)
 
 	var err error
 
-	ctx, err = bus.DialEndpoint(clientEnd)
+	ctx, err = DialEndpoint(clientEnd)
 
 	if err != nil {
 		log.Println(err)
+		os.Exit(-1)
 	}
 
-    request := &TestFrame{
-        EventType: TestFrame_PING,
-        Ping: &TestFrame_Ping{
-            uint64(time.Now().Unix()),
-        },
-    }
+	os.Exit(m.Run())
 
-    ctx.Send(request, func(msg proto.Message, err error) {
-        if err != nil {
-            log.Println("Error:", err)
-        }
-    })
 ```
 
 Take a look at bus_test.go
 
 # TL;DR #
 
- 1. Provide an implementation of a desired endpoint interface with coupled MessageHandler and/or ContextHandler interfaces
+ 1. Provide an implementation of a MessageHandler and/or ContextHandler interfaces
  2. Serve or Dial
  3. Send and Receive messages regardless of endpoint type and serialization format.
- 4. Provide some feedback here if anything fails :)
 
 ### What's Missing?
 
-1. HttpEndpoint handling is still under development.
-2. Websocket support is still under development but since its trivial it will be available, soon.
+1. WebEndpoint handling is still under development.
+2. Websocket support is still under development.
 3. Auto reconnection needs extreme testing for race conditions.
 4. Logging is completely absent with one or two exceptions, exposing an optional interface would be nice for logging callbacks or waiting industry to embrace a common logging framework (poor man's choice).
 5. Testing is merely present, needs improvement in terms of coverage percentage and functionality.
