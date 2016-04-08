@@ -23,7 +23,7 @@ type Endpoint struct {
 	// Optional
 	//
 	// Id is present for correlation between endpoints and contexts.
-	// More practical usage of different endpointIds is when you need to connect to the same endpoint with same ip/port/transport.
+	// More practical usage of different endpointIds is when you need to connect to the same endpoint with same ip/port/transport multiple times.
 	//
 	// Bus differentiates the endpoints by generating keys with;
 	//
@@ -52,13 +52,26 @@ type Endpoint struct {
 	// Implementors may choose to provide Hostname (FQDN) instead of Address, bus will try to resolve the FQDN if provided.
 	FQDN            string
 
-	// Transport may be one of "tcp|udp|ws"
+	// Transport may be one of "tcp|udp|http|https|ws"
 	Transport       string
 
 	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
 	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
 	// buffer is full.
 	BufferSize      int
+
+	// Used for websockets
+	Origin      string
+
+	// The url of the http(s) and websocket endpoints
+	ResourceUrl string
+
+	// post|put|get types supported
+	Method      string
+
+	// Currently Protobuf and Json payload types are supported
+	PayloadType PayloadType
+
 
 
 	// reconnect true|false, max attempt count between disconnects, delay between attempts.
@@ -79,23 +92,6 @@ type Endpoint struct {
 
 	// Optional, Check documentation of ContextHandler interface.
 	C               ContextHandler
-}
-
-// WebEndpoint interface for http|https|ws
-type WebEndpoint struct {
-	// Used for websockets
-	Origin      string
-
-	// Returns the url of the http(s) and websocket endpoints
-	ResourceUrl string
-
-	// post|put|get types supported
-	Method      string
-
-	// Currently Protobuf and Json payload types are supported
-	PayloadType PayloadType
-
-	Endpoint
 }
 
 type ThrottlingStrategy string

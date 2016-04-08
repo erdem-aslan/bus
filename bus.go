@@ -81,12 +81,6 @@ func DialEndpoint(e *Endpoint) (Context, error) {
 	return ctx, nil
 }
 
-// DialHttpEndpoint, Idiomatic entry point for client side communication for http(s) endpoints.
-func DialWebEndpoint(e *WebEndpoint) (Context, error) {
-	//@todo
-	return nil, errors.New("Not implemented")
-}
-
 // Serve, Idiomatic function for server side communication via Bus
 //
 // As opposed to Dial, Serve provides the contexts attached to given endpoints within ContextHandler

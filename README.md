@@ -24,14 +24,12 @@ More importantly, if you have a feature idea that extends (or composes ?) the cu
 
  ***Handlers :*** Interfaces for event and state reporting asynchronously.
 
-### Endpoints
+### Endpoint
 
-Every network node, server or client, is defined via **Endpoints** and **WebEndpoints**.
-
-***Endpoint***
-
+Every network node, server or client, is defined via **Endpoint**.
 
 ```
+// Endpoint interface defines the contract for various endpoints for different socket transports.
 type Endpoint struct {
 	// Id
 	//
@@ -40,7 +38,7 @@ type Endpoint struct {
 	// Optional
 	//
 	// Id is present for correlation between endpoints and contexts.
-	// More practical usage of different endpointIds is when you need to connect to the same endpoint with same ip/port/transport.
+	// More practical usage of different endpointIds is when you need to connect to the same endpoint with same ip/port/transport multiple times.
 	//
 	// Bus differentiates the endpoints by generating keys with;
 	//
@@ -69,13 +67,26 @@ type Endpoint struct {
 	// Implementors may choose to provide Hostname (FQDN) instead of Address, bus will try to resolve the FQDN if provided.
 	FQDN            string
 
-	// Transport may be one of "tcp|udp|ws"
+	// Transport may be one of "tcp|udp|http|https|ws"
 	Transport       string
 
 	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
 	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
 	// buffer is full.
 	BufferSize      int
+
+	// Used for websockets
+	Origin      string
+
+	// The url of the http(s) and websocket endpoints
+	ResourceUrl string
+
+	// post|put|get types supported
+	Method      string
+
+	// Currently Protobuf and Json payload types are supported
+	PayloadType PayloadType
+
 
 
 	// reconnect true|false, max attempt count between disconnects, delay between attempts.
@@ -101,28 +112,8 @@ type Endpoint struct {
 ```
 
 
-***WebEndpoint***
-
-```
-type WebEndpoint struct {
-	// Used for websockets
-	Origin      string
-
-	// Returns the url of the http(s) and websocket endpoints
-	ResourceUrl string
-
-	// post|put|get types supported
-	Method      string
-
-	// Currently Protobuf and Json payload types are supported
-	PayloadType PayloadType
-
-	Endpoint
-}
-
-```
-
-MessageHandler interface exposing a single method, is your listening point for incoming messages. Bus will return error if you don't provide one and every HandleMessage callback is executed in a new goroutine
+MessageHandler interface exposing a single method, is your listening point for incoming messages.
+Bus will return error if you don't provide one and every HandleMessage callback is executed in a new goroutine
 
 ```
 type MessageHandler interface {
@@ -419,14 +410,14 @@ Take a look at bus_test.go
  2. Serve or Dial
  3. Send and Receive messages regardless of endpoint type and serialization format.
 
-### What's Missing?
+### In progress
 
-1. WebEndpoint handling is still under development.
+1. http|https handling is still under development.
 2. Websocket support is still under development.
-3. Auto reconnection needs extreme testing for race conditions.
+3. Auto reconnection needs testing for race conditions.
 4. Logging is completely absent with one or two exceptions, exposing an optional interface would be nice for logging callbacks or waiting industry to embrace a common logging framework (poor man's choice).
 5. Testing is merely present, needs improvement in terms of coverage percentage and functionality.
-6. Throttling implementation is ready but needs to be heavily tested internally, but it will be available eventually but not at the moment.
+6. Throttling implementation.
 
 
 ## License ##

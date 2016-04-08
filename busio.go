@@ -62,6 +62,10 @@ func serve(e *Endpoint) error {
 		err = serveUdp(e)
 	case "ws":
 		err = serveWs(e)
+	case "http":
+		err = serveHttp(e, false)
+	case "https":
+		err = serveHttp(e, true)
 	default:
 		err = errors.New(fmt.Sprintf("Unhandled transport type for serving: %s", e.Transport))
 	}
@@ -135,9 +139,14 @@ func serveWs(e *Endpoint) error {
 	return errors.New("not implemented")
 }
 
+func serveHttp(e *Endpoint, isSecure bool) error {
+	//@todo
+	return errors.New("not implemented")
+}
+
 func accept(l net.Listener, e *Endpoint, quit <-chan struct{}) {
 
-infinite:
+	infinite:
 	for {
 
 		conn, err := l.Accept()
@@ -148,11 +157,11 @@ infinite:
 
 			select {
 			case <-quit:
-				// Listener is closed, all we need to do is stop.
+			// Listener is closed, all we need to do is stop.
 				break infinite
 
 			default:
-				// default block for not blocking quit chan case.
+			// default block for not blocking quit chan case.
 			}
 
 			continue
@@ -189,7 +198,7 @@ func startMainLoop(ctx *socketContext) {
 		var readOpen bool
 		var message proto.Message
 
-	infinite:
+		infinite:
 		for {
 			select {
 			case message, readOpen = <-rc:
@@ -200,9 +209,9 @@ func startMainLoop(ctx *socketContext) {
 
 					if !ctx.served {
 
-						r:= ctx.Endpoint().ShouldReconnect
-						c:= ctx.Endpoint().MaxAttemptCount
-						d:= ctx.Endpoint().DelayDuration
+						r := ctx.Endpoint().ShouldReconnect
+						c := ctx.Endpoint().MaxAttemptCount
+						d := ctx.Endpoint().DelayDuration
 
 						if r && (c == 0 || ctx.rcCount < c) {
 
@@ -226,7 +235,7 @@ func startMainLoop(ctx *socketContext) {
 
 	go func(ctx *socketContext) {
 
-	infinite:
+		infinite:
 		for {
 			select {
 
@@ -268,7 +277,7 @@ func startMainLoop(ctx *socketContext) {
 
 }
 
-func quitWriter(ctx *socketContext, pwc chan<- *busPromise, wc chan<- *busPromise) {
+func quitWriter(ctx *socketContext, pwc chan <- *busPromise, wc chan <- *busPromise) {
 
 	close(pwc)
 	close(wc)
