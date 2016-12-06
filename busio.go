@@ -1,8 +1,6 @@
 package bus
 
 import (
-	"errors"
-	"fmt"
 	"github.com/golang/protobuf/proto"
 	"net"
 	"time"
@@ -60,14 +58,8 @@ func serve(e *Endpoint) error {
 		err = serveTcp(e)
 	case "udp":
 		err = serveUdp(e)
-	case "ws":
-		err = serveWs(e)
-	case "http":
-		err = serveHttp(e, false)
-	case "https":
-		err = serveHttp(e, true)
 	default:
-		err = errors.New(fmt.Sprintf("Unhandled transport type for serving: %s", e.Transport))
+		err = BusError_InvalidTransport
 	}
 
 	return err
@@ -132,16 +124,6 @@ func serveUdp(e *Endpoint) error {
 
 	return nil
 
-}
-
-func serveWs(e *Endpoint) error {
-	//@todo
-	return errors.New("not implemented")
-}
-
-func serveHttp(e *Endpoint, isSecure bool) error {
-	//@todo
-	return errors.New("not implemented")
 }
 
 func accept(l net.Listener, e *Endpoint, quit <-chan struct{}) {
@@ -227,7 +209,7 @@ func startMainLoop(ctx *socketContext) {
 					break infinite
 				}
 
-				go ctx.e.M.HandleMessage(ctx, message)
+				go ctx.e.MessageHandler.HandleMessage(ctx, message)
 			}
 		}
 

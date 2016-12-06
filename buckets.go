@@ -50,7 +50,20 @@ type SleepStrategy interface {
 	Sleep()
 }
 
-type DefaultBucket struct {
+func newLeakyBucket(capacity int64, size int64) Bucket {
+
+	return simpleLeakyBucket{
+		capacity,
+		newFixedIntervalRefillStrategy(capacity, time.Duration(1000*1000*1000)),
+		microSleepStrategy{},
+		size,
+	}
+}
+
+
+// SimpleBucket
+// Implementation of Bucket interface
+type simpleLeakyBucket struct {
 	capacity       int64
 	refillStrategy RefillStrategy
 	sleepStrategy  SleepStrategy
@@ -58,11 +71,11 @@ type DefaultBucket struct {
 	sync.RWMutex
 }
 
-func (b *DefaultBucket) Capacity() int64 {
+func (b *simpleLeakyBucket) Capacity() int64 {
 	return b.capacity
 }
 
-func (b *DefaultBucket) NumberOfTokens() int64 {
+func (b *simpleLeakyBucket) NumberOfTokens() int64 {
 
 	b.RLock()
 	defer b.RUnlock()
@@ -72,15 +85,15 @@ func (b *DefaultBucket) NumberOfTokens() int64 {
 	return b.size
 }
 
-func (b *DefaultBucket) DurationUntilNextRefill() int64 {
+func (b *simpleLeakyBucket) DurationUntilNextRefill() int64 {
 	return b.refillStrategy.DurationUntilNextRefill()
 }
 
-func (b *DefaultBucket) TryConsume() bool {
+func (b *simpleLeakyBucket) TryConsume() bool {
 	return b.TryConsumeMulti(1)
 }
 
-func (b *DefaultBucket) TryConsumeMulti(numTokens int64) bool {
+func (b *simpleLeakyBucket) TryConsumeMulti(numTokens int64) bool {
 
 	b.RLock()
 	defer b.RUnlock()
@@ -100,11 +113,11 @@ func (b *DefaultBucket) TryConsumeMulti(numTokens int64) bool {
 
 }
 
-func (b *DefaultBucket) Consume() {
+func (b *simpleLeakyBucket) Consume() {
 	b.ConsumeMulti(1)
 }
 
-func (b *DefaultBucket) ConsumeMulti(numTokens int64) {
+func (b *simpleLeakyBucket) ConsumeMulti(numTokens int64) {
 
 	for {
 		if b.TryConsumeMulti(numTokens) {
@@ -116,10 +129,73 @@ func (b *DefaultBucket) ConsumeMulti(numTokens int64) {
 
 }
 
-func (b *DefaultBucket) refill() {
+func (b *simpleLeakyBucket) refill() {
 	b.Lock()
 	defer b.Unlock()
 
 	newTokens := math.Min(b.capacity, math.Max(0, b.refillStrategy.Refill()))
 	b.size = math.Max(0, math.Min(b.size + newTokens, b.capacity))
 }
+
+func newFixedIntervalRefillStrategy(numTokensPerPeriod int64, period time.Duration) *FixedIntervalRefillStrategy {
+
+	return &FixedIntervalRefillStrategy{
+		numTokensPerPeriod,
+		period,
+		-period,
+		-period,
+	}
+
+}
+
+//FixedIntervalRefillStrategy
+//Implementation of RefillStrategy
+type FixedIntervalRefillStrategy struct {
+	numTokensPerPeriod          int64
+	periodDurationInNanoseconds int64
+	lastRefillTime              int64
+	nextRefillTime              int64
+}
+
+func (f *FixedIntervalRefillStrategy) Refill() int64 {
+
+	now := time.Now()
+
+	if now < f.nextRefillTime {
+		return 0
+	}
+
+	numPeriods := math.Max(0, (now - f.lastRefillTime) / f.periodDurationInNanoseconds)
+
+	f.lastRefillTime += numPeriods * f.periodDurationInNanoseconds
+	f.nextRefillTime = f.lastRefillTime + f.periodDurationInNanoseconds
+
+	return numPeriods * f.numTokensPerPeriod
+
+}
+
+func (f *FixedIntervalRefillStrategy) DurationUntilNextRefill() time.Duration {
+
+	now := time.Now()
+	return math.Max(0, f.nextRefillTime - now)
+
+}
+
+type noSleepStrategy struct {
+
+}
+
+func (s *noSleepStrategy) Sleep() {
+	return
+}
+
+type microSleepStrategy struct {
+
+}
+
+func (s *microSleepStrategy) Sleep() {
+	// Sleep for the smallest unit of time possible just to relinquish control
+	// and to allow other routines to receive cpu time.
+	time.Sleep(1)
+}
+

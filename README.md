@@ -3,18 +3,12 @@
 GOBus, 'Bus' in short, is a  tiny framework for message-driven development in golang, using protocol buffers objects over the wire. Networking is based on peer to peer client/server architecture.
 
 Bus in a nutshell, acts as a messaging "bus" with complete transporting support for protocol buffer objects.
-It handles the framing, reliability of connections (tcp|udp|ws (websocket) endpoints), throttling (all endpoints) and  ordered delivery (all endpoints) of messages.
+It handles the framing, reliability of connections, throttling and  ordered delivery of messages.
 
 Although, messaging structure is defined via protobuf, since protobuf supports JSON, serialization and deserialization may be in JSON format
-for http|https|ws endpoints if desired.
+for ws endpoints if desired.
 
-All exposed messaging methods / functions are, unless explicitly documented, work asynchronously. In Bus, everything is a 'Promise'.
-
-If you are coming from Java or a JVM based language, you may find some similarities with Netty framework but Bus is more lightweight in terms of both resources and functionality, so tiny means tiny.
-
-While, internals are still changing (primarily for increasing readability and performance), declared interfaces and public APIs are locked / final so you can safely start using Bus.
-More importantly, if you have a feature idea that extends (or composes ?) the current feature set without breaking the API, feel free to submit a pull request.
-
+All exposed messaging methods/functions are are asynchronous and thread safe. In Bus, everything is a 'Promise'.
 
 ## Interfaces
 
@@ -67,27 +61,13 @@ type Endpoint struct {
 	// Implementors may choose to provide Hostname (FQDN) instead of Address, bus will try to resolve the FQDN if provided.
 	FQDN            string
 
-	// Transport may be one of "tcp|udp|http|https|ws"
+	// Transport may be one of "tcp|udp"
 	Transport       string
 
 	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
 	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
 	// buffer is full.
 	BufferSize      int
-
-	// Used for websockets
-	Origin      string
-
-	// The url of the http(s) and websocket endpoints
-	ResourceUrl string
-
-	// post|put|get types supported
-	Method      string
-
-	// Currently Protobuf and Json payload types are supported
-	PayloadType PayloadType
-
-
 
 	// reconnect true|false, max attempt count between disconnects, delay between attempts.
 	// If you provide zero or negative max attempt count, Bus will try reconnecting forever
@@ -417,7 +397,6 @@ Take a look at bus_test.go
 3. Auto reconnection needs testing for race conditions.
 4. Logging is completely absent with one or two exceptions, exposing an optional interface would be nice for logging callbacks or waiting industry to embrace a common logging framework (poor man's choice).
 5. Testing is merely present, needs improvement in terms of coverage percentage and functionality.
-6. Throttling implementation.
 
 
 ## License ##

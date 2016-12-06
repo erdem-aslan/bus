@@ -7,13 +7,6 @@ import (
 	"time"
 )
 
-type PayloadType int
-
-const (
-	ProtoBuf PayloadType = iota
-	Json
-)
-
 // Endpoint interface defines the contract for various endpoints for different socket transports.
 type Endpoint struct {
 	// Id
@@ -40,73 +33,65 @@ type Endpoint struct {
 	// So assign an Id and always return the same value for individual endpoint implementations of yours.
 	//
 	// Package level Stop... functions all depend on EndpointId parameter in order to stop serving endpoints.
-	Id              string
+	Id                string
 
 	// Address information, ipv4|ipv6
-	Address         string
+	Address           string
 
 	// Port information
-	Port            int
+	Port              int
 
-	// FQDN, Fully qualified domain name information.
+	// FQDN, Fully qualified domain name.
 	// Implementors may choose to provide Hostname (FQDN) instead of Address, bus will try to resolve the FQDN if provided.
-	FQDN            string
+	FQDN              string
 
-	// Transport may be one of "tcp|udp|http|https|ws"
-	Transport       string
+	// Transport may be one of "tcp|udp|ws"
+	Transport         string
 
 	// BufferSize, if provided other than zero, defines the message queue size of the endpoint.
 	// Bus would still accept messages if Endpoint is not reachable and/or in reconnecting state until endpoint's
 	// buffer is full.
-	BufferSize      int
+	BufferSize        int
 
 	// Used for websockets
-	Origin      string
+	Origin            string
 
 	// The url of the http(s) and websocket endpoints
-	ResourceUrl string
-
-	// post|put|get types supported
-	Method      string
-
-	// Currently Protobuf and Json payload types are supported
-	PayloadType PayloadType
-
-
+	ResourceUrl       string
 
 	// reconnect true|false, max attempt count between disconnects, delay between attempts.
 	// If you provide zero or negative max attempt count, Bus will try reconnecting forever
 	// This method is used only for client side.
-	ShouldReconnect bool
-	MaxAttemptCount int
-	DelayDuration   time.Duration
+	ShouldReconnect   bool
+	MaxAttemptCount   int
+	DelayDuration     time.Duration
 
 	// PrototypeInstance should return a zero value of User's Protocol Buffer object.
-	P               proto.Message
+	Prototype         proto.Message
 
-	// Optional, Check documentation of ThrottlingHandler interface.
-	T               ThrottlingHandler
+	// Optional, Check documentation of ThrottlingCriteria struct.
+	ThrottlingCriteria ThrottlingCriteria
 
 	// Mandatory, Check documentation of MessageHandler interface.
-	M               MessageHandler
+	MessageHandler    MessageHandler
 
 	// Optional, Check documentation of ContextHandler interface.
-	C               ContextHandler
+	ContextHandler    ContextHandler
 }
 
 type ThrottlingStrategy string
 
 const (
 	BusTs_MPS ThrottlingStrategy = "Message-Per-Second"
-	BusTs_BPS = "Bytes-Per-Second"
+	BusTs_BPS ThrottlingStrategy = "Bytes-Per-Second"
 )
 
-// Handler for throttling, optional for all endpoints
+// Criteria for throttling, optional for all endpoints
 // While, MPS strategy should be deterministic, BPS is generally best effort.
 //
 // Once an endpoint is passed to Bus functions, during live period of the endpoint,
 // throttling values are final regardless of different values you return from your implementation
-type ThrottlingHandler struct {
+type ThrottlingCriteria struct {
 	// MPS or BPS
 	Strategy               ThrottlingStrategy
 
@@ -130,16 +115,6 @@ func resolveAddress(e *Endpoint) (string, error) {
 	e.Port == 0 || e.Transport == "" {
 
 		return "", BusError_DestInfoMissing
-	}
-
-	t := e.Transport
-
-	if t != "tcp" &&
-	t != "udp" &&
-	t != "ws" &&
-	t != "http" &&
-	t != "https" {
-		return "", BusError_InvalidTransport
 	}
 
 	port := strconv.Itoa(e.Port)
@@ -186,11 +161,11 @@ func evalAddressAndKey(e *Endpoint) (string, string, error) {
 		return "", "", BusError_EndpointAlreadyRegistered
 	}
 
-	if e.P == nil {
+	if e.Prototype == nil {
 		return "", "", BusError_MissingPrototypeInstance
 	}
 
-	if e.M == nil {
+	if e.MessageHandler == nil {
 		return "", "", BusError_MissingMessageHandler
 	}
 

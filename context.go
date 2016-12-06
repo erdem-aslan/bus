@@ -122,6 +122,14 @@ type socketContext struct {
 	// network disconnect signal chan
 	netQuit chan struct{}
 
+	// Bucket for throttling incoming traffic
+	inBucket Bucket
+	// Bucket for throttling outgoing traffic
+	outBucket Bucket
+	// throttling type
+	strategy ThrottlingStrategy
+
+
 	sync.RWMutex
 }
 
@@ -279,7 +287,7 @@ func (c *socketContext) setState(s ContextState) {
 
 func (c *socketContext) notifyLc(s ContextState) {
 
-	l := c.e.C
+	l := c.e.ContextHandler
 
 	if l == nil {
 		return

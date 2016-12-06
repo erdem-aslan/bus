@@ -21,29 +21,41 @@ func TestMain(m *testing.M) {
 		Port:         9000,
 		Address:      "127.0.0.1",
 		Transport:    "tcp",
-		P: &TestFrame{},
+		Prototype: &TestFrame{},
 		BufferSize:   100000,
+		ThrottlingCriteria: ThrottlingCriteria{
+			BusTs_MPS,
+			10,
+			10,
+		},
 	}
 
-	clientEnd.C = &testContextHandler{client: true}
-	clientEnd.M = &testMessageHandler{client: true}
+	clientEnd.ContextHandler = &testContextHandler{client: true}
+	clientEnd.MessageHandler = &testMessageHandler{client: true}
 
 	serverEnd = &Endpoint{
 		Id:           "test-server",
 		Port:         9000,
 		Address:      "127.0.0.1",
 		Transport:    "tcp",
-		P: &TestFrame{},
+		Prototype: &TestFrame{},
+
+		ThrottlingCriteria: ThrottlingCriteria{
+			BusTs_MPS,
+			10,
+			10,
+		},
+
 	}
 
-	serverEnd.C = &testContextHandler{client: false}
-	serverEnd.M = &testMessageHandler{client: false}
+	serverEnd.ContextHandler = &testContextHandler{client: false}
+	serverEnd.MessageHandler = &testMessageHandler{client: false}
 
 	Serve(nil, serverEnd)
 
 	var err error
 
-	ctx, err = DialEndpoint(clientEnd)
+	ctx, err = Dial(clientEnd)
 
 	if err != nil {
 		log.Println(err)

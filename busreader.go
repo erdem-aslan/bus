@@ -14,7 +14,7 @@ func startNewReader(ctx *socketContext) <-chan proto.Message {
 	go func(ctx *socketContext, rc chan proto.Message) {
 
 		reader := bufio.NewReader(ctx.conn)
-		protoMessage := proto.Clone(ctx.Endpoint().P)
+		protoMessage := proto.Clone(ctx.Endpoint().Prototype)
 
 		for {
 			select {
@@ -111,3 +111,16 @@ func readBody(length uint64, b *bufio.Reader, m proto.Message, readChan chan<- p
 	return nil
 
 }
+
+type throttledReader struct {
+	t *ThrottlingCriteria
+	b *bufio.Reader
+
+}
+
+func (t *throttledReader) Read(p []byte) (n int, err error) {
+
+}
+
+
+

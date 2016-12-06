@@ -1,8 +1,5 @@
 // Package bus, acts as a messaging "bus" with complete transporting support for protocol buffer objects.
-// It handles the framing, reliability of connections (tcp|udp|ws (websocket) endpoints), throttling (all endpoints) and  ordered delivery (all endpoints) of messages.
-//
-// Although, messaging structure is defined via protobuf, since protobuf supports JSON, serialization and deserialization may be in JSON format
-// for http|https endpoints if desired.
+// It handles the framing, reliability of connections, throttling  and  ordered delivery of messages.
 //
 // Further documentation and samples can be found at https://github.com/gladmir/bus
 package bus
@@ -16,17 +13,23 @@ import (
 type PromiseState string
 
 const (
-	SendScheduled       PromiseState = "SendScheduled"
-	Queued                           = "Queued"
-	Cancelled                        = "Cancelled"
-	Sent                             = "Sent"
-	FailedTimeout                    = "FailedTimeout"
-	FailedSerialization              = "FailedSerialization"
-	FailedTransport                  = "FailedTransport"
+	SendScheduled  = "SendScheduled"
+	Queued = "Queued"
+	Cancelled = "Cancelled"
+	Sent = "Sent"
+	FailedTimeout = "FailedTimeout"
+	FailedSerialization = "FailedSerialization"
+	FailedTransport = "FailedTransport"
+
+	BusError_InvalidTransport = errors.New("Invalid transport")
+	BusError_DestInfoMissing = errors.New("Missing fqdn/ip or port")
+	BusError_EndpointAlreadyRegistered = errors.New("Endpoint already registered")
+	BusError_MissingPrototypeInstance = errors.New("Prototype instance is missing")
+	BusError_MissingMessageHandler = errors.New("Missing message handler implementation")
+
 )
 
 var (
-
 	// contexts map holds the references of 'live' contexts with keys generated via
 	// [endpoint's id] + [endpoint's ip] + [endpoint's port] + [endpoints's transport]
 	contexts map[string]*socketContext = make(map[string]*socketContext)
@@ -37,25 +40,22 @@ var (
 	// key = endpointId, value net.Listener.
 	endpointListeners map[string]*listenerShutdown = make(map[string]*listenerShutdown)
 
-	cLock  sync.RWMutex
+	cLock sync.RWMutex
 	scLock sync.RWMutex
 	elLock sync.RWMutex
 
-	BusError_InvalidTransport          = errors.New("Invalid transport")
-	BusError_DestInfoMissing           = errors.New("Missing fqdn/ip or port")
-	BusError_EndpointAlreadyRegistered = errors.New("Endpoint already registered")
-	BusError_MissingPrototypeInstance  = errors.New("Prototype instance is missing")
-	BusError_MissingMessageHandler     = errors.New("Missing message handler implementation")
 )
 
-// DialEndpoint, Idiomatic entry point for client side communication for socket endpoints.
-func DialEndpoint(e *Endpoint) (Context, error) {
+// Dial, Idiomatic entry point for client side communication to socket endpoints.
+func Dial(e *Endpoint) (Context, error) {
 
 	destAddress, cKey, err := evalAddressAndKey(e)
 
 	if err != nil {
 		return nil, err
 	}
+
+	in, out := createBuckets(e.ThrottlingCriteria)
 
 	ctx := &socketContext{
 		e:            e,
@@ -64,6 +64,9 @@ func DialEndpoint(e *Endpoint) (Context, error) {
 		ctxQueue:     make(chan *busPromise, e.BufferSize),
 		ctxQuit:      make(chan struct{}),
 		netQuit:      make(chan struct{}),
+		inBucket:in,
+		outBucket:out,
+		strategy:e.ThrottlingCriteria.Strategy,
 	}
 
 	ctx.setState(Opening)
@@ -163,7 +166,6 @@ func StopServingAll() {
 // Stop, Short hand func for;
 //  - Close all client and server contexts
 //  - Close all served endpoints
-//  - Report back any error if ResultFunc is not nil.
 func Stop(r ResultFunc) {
 
 	for _, cc := range contexts {
@@ -171,4 +173,16 @@ func Stop(r ResultFunc) {
 	}
 
 	StopServingAll()
+}
+
+func createBuckets(t *ThrottlingCriteria) (in Bucket, out Bucket) {
+
+	if nil == t {
+		return nil
+	}
+
+	in = newLeakyBucket(t.IncomingLimitPerSecond, t.IncomingLimitPerSecond)
+	out = newLeakyBucket(t.OutgoingLimitPerSecond, t.OutgoingLimitPerSecond)
+
+	return
 }
